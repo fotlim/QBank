@@ -1,0 +1,26 @@
+﻿# 构建产物
+bin/
+obj/
+publish/
+*.user
+*.suo
+.vs/
+
+# 安装包产物
+install/Output/
+install/.test/
+
+# 运行时数据
+data/
+*.db
+*.db-wal
+*.db-shm
+config.json
+config.json.bad
+startup.log
+
+# 截图临时目录
+tools/shots/
+
+# 自测临时目录
+.selftest/
