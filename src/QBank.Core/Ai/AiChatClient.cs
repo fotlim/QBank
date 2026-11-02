@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -56,9 +56,15 @@ public sealed class AiChatResult
 /// </summary>
 public sealed class AiChatClient
 {
-    private readonly HttpClient _http;
+    private readonly HttpClient? _httpOverride;
 
-    public AiChatClient(HttpClient? http = null) => _http = http ?? HttpClients.Shared;
+    public AiChatClient(HttpClient? http = null) => _httpOverride = http;
+
+    /// <summary>
+    /// 每次都向 HttpClients 要最新的客户端 —— 设置里改了代理模式会重建共享客户端，
+    /// 如果这里缓存了旧实例，改完设置还得重启才能生效。
+    /// </summary>
+    private HttpClient _http => _httpOverride ?? HttpClients.Shared;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -187,13 +193,13 @@ public sealed class AiChatClient
         catch (HttpRequestException ex)
         {
             result.Ok = false;
-            result.Error = "网络请求失败：" + ex.Message;
+            result.Error = HttpClients.ExplainNetworkError(ex);
             return result;
         }
         catch (Exception ex)
         {
             result.Ok = false;
-            result.Error = ex.Message;
+            result.Error = HttpClients.ExplainNetworkError(ex);
             return result;
         }
     }

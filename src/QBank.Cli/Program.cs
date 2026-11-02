@@ -1,5 +1,6 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
+using QBank.Core;
 using QBank.Core.Ai;
 using QBank.Core.Bridge;
 using QBank.Core.Lan;
@@ -50,6 +51,7 @@ internal static class Program
             await RunAsync("OCS 题库 POST 请求", () => TestOcsPostAsync(workDir));
             await RunAsync("AI 答题", () => TestAiAnswerAsync(workDir));
             await RunAsync("AI 模型列表", () => TestModelCatalogAsync(workDir));
+            await RunAsync("网络出口（死代理绕行）", TestNetworkConfigAsync);
             await RunAsync("本地题库增删查", () => TestLocalBankAsync(workDir));
             await RunAsync("题库导入导出", () => TestImportExportAsync(workDir));
             await RunAsync("历史记录", () => TestHistoryAsync(workDir));
@@ -446,6 +448,83 @@ internal static class Program
         Check(ollamaResult.Ok, "Ollama 模型列表应成功：" + ollamaResult.Error);
         CheckEqual(1, ollamaResult.Models.Count, "Ollama 模型数量");
         CheckEqual("8.2B", ollamaResult.Models[0].ParameterSize, "参数量");
+    }
+
+    private static async Task TestNetworkConfigAsync()
+    {
+        // 1) 三种模式构建出来的 proxy 对象
+        var direct = new NetworkConfig { ProxyMode = "direct" };
+        Check(direct.BuildProxy() is null, "直连模式下不应该有代理对象");
+        CheckEqual("直连（忽略系统代理）", direct.Describe(), "直连模式的描述");
+
+        var custom = new NetworkConfig { ProxyMode = "custom", ProxyUrl = "http://127.0.0.1:7890" };
+        var proxy = custom.BuildProxy() as System.Net.WebProxy;
+        Check(proxy is not null, "自定义模式应构建出 WebProxy");
+        Check(proxy!.Address?.ToString() == "http://127.0.0.1:7890/", "代理地址应正确，实际 " + proxy.Address);
+        Check(proxy.BypassList.Length > 0, "应该带上免代理列表");
+        Check(custom.Describe().Contains("7890"), "描述里应带代理地址");
+
+        var emptyCustom = new NetworkConfig { ProxyMode = "custom", ProxyUrl = "" };
+        Check(emptyCustom.BuildProxy() is null, "自定义模式没填地址应退回直连");
+
+        // 2) 端口探活：先起一个监听，再关掉
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var livePort = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        Check(HttpClients.IsPortListening("127.0.0.1", livePort), "活着的端口应被判为在监听");
+        listener.Stop();
+        Check(!HttpClients.IsPortListening("127.0.0.1", livePort), "关掉的端口应被判为没人听");
+
+        // 3) 代理设置真的会生效：把代理指到一个死端口，请求应该连不上
+        using var mock = new MockServer();
+        mock.Map("/v1/models", (query, body) => (200, "application/json", "{\"data\":[{\"id\":\"m1\"}]}"));
+        var deadProxy = new NetworkConfig
+        {
+            ProxyMode = "custom",
+            ProxyUrl = "http://127.0.0.1:" + livePort,   // 刚刚关掉的那个端口
+            FallbackToDirectOnProxyFailure = false,
+        };
+
+        var viaDeadProxy = await ProbeAsync(HttpClients.Create(deadProxy), mock.BaseUrl + "/v1/models");
+        Check(!viaDeadProxy, "走死代理应该请求失败");
+
+        var viaDirect = await ProbeAsync(HttpClients.Create(direct), mock.BaseUrl + "/v1/models");
+        Check(viaDirect, "直连应该请求成功");
+
+        // 4) auto 模式下，系统代理若是死的就要自动改走直连
+        var auto = new NetworkConfig { ProxyMode = "auto", FallbackToDirectOnProxyFailure = true };
+        var deadDetected = HttpClients.DescribeSystemProxyState(out var sysDesc, out var sysDead);
+        if (deadDetected && sysDead)
+        {
+            var client = HttpClients.Create(auto);
+            var ok = await ProbeAsync(client, mock.BaseUrl + "/v1/models");
+            Check(ok, "系统代理是死的（" + sysDesc + "）时应自动绕过");
+            Check(HttpClients.AutoFallbackNote is not null, "应记录自动绕行的说明");
+            Console.WriteLine($"      系统代理 {sysDesc} 无人监听 → 已自动直连");
+        }
+        else
+        {
+            Console.WriteLine("      系统代理正常或未设置，跳过自动绕行断言");
+        }
+
+        // 5) 错误信息应该提到「网络出口」
+        var explained = HttpClients.ExplainNetworkError(
+            new HttpRequestException("由于目标计算机积极拒绝，无法连接。 (127.0.0.1:12000)"));
+        Check(explained.Contains("网络出口"), "死代理的错误提示应指引到「网络出口」设置，实际：" + explained);
+    }
+
+    private static async Task<bool> ProbeAsync(HttpClient client, string url)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var response = await client.GetAsync(url, cts.Token);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static Task TestLocalBankAsync(string workDir)

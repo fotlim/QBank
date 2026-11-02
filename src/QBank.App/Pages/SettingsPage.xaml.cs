@@ -1,9 +1,10 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using QBank.App.Controls;
 using QBank.App.Services;
+using QBank.Core.Ai;
 using QBank.Core.Models;
 using QBank.Core.Ocr;
 using QBank.Core.Ocs;
@@ -58,6 +59,11 @@ public sealed partial class SettingsPage : Page
                     break;
                 case "data":
                     DataCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
+                    break;
+                case "net":
+                case "network":
+                case "proxy":
+                    NetworkCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
                     break;
                 case "ocs":
                     OcsListCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
@@ -153,6 +159,16 @@ public sealed partial class SettingsPage : Page
             UpdateOcsBridgeStatus();
 
             DataDirText.Text = "数据目录：" + AppServices.Current.Config.DataDir;
+
+            // 网络出口
+            var net = cfg.Network ??= new NetworkConfig();
+            SelectProxyMode(net.ProxyMode);
+            ProxyUrlBox.Text = net.ProxyUrl ?? string.Empty;
+            ProxyBypassBox.Text = net.BypassList ?? string.Empty;
+            ProxyFallbackBox.IsChecked = net.FallbackToDirectOnProxyFailure;
+            UpdateProxyModeUi();
+            UpdateNetworkStatus();
+
             RefreshStats();
         }
         finally
@@ -520,6 +536,122 @@ public sealed partial class SettingsPage : Page
         if (WindowsLangCombo.SelectedItem is string lang) cfg.Ocr.WindowsLanguage = lang;
     }
 
+    // ── 网络出口 ──────────────────────────────────────────
+
+    private string CurrentProxyMode() =>
+        (ProxyModeBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "auto";
+
+    private void SelectProxyMode(string? mode)
+    {
+        var want = string.IsNullOrWhiteSpace(mode) ? "auto" : mode.Trim().ToLowerInvariant();
+        foreach (var item in ProxyModeBox.Items)
+        {
+            if (item is ComboBoxItem ci && string.Equals(ci.Tag as string, want, StringComparison.OrdinalIgnoreCase))
+            {
+                ProxyModeBox.SelectedItem = ci;
+                return;
+            }
+        }
+        ProxyModeBox.SelectedIndex = 0;
+    }
+
+    private void OnProxyModeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateProxyModeUi();
+        if (!_loading) UpdateNetworkStatus();
+    }
+
+    private void UpdateProxyModeUi()
+    {
+        var mode = CurrentProxyMode();
+        var custom = mode == "custom";
+        ProxyUrlBox.IsEnabled = custom;
+        ProxyFallbackBox.IsEnabled = mode == "auto";
+        if (!custom && string.IsNullOrWhiteSpace(ProxyUrlBox.Text))
+            ProxyUrlBox.PlaceholderText = "只有在「自定义代理」模式下才生效";
+        else
+            ProxyUrlBox.PlaceholderText = "http://127.0.0.1:7890";
+    }
+
+    private void ApplyNetworkToConfig()
+    {
+        var cfg = AppServices.Current.Config.Config;
+        var net = cfg.Network ??= new NetworkConfig();
+        net.ProxyMode = CurrentProxyMode();
+        net.ProxyUrl = (ProxyUrlBox.Text ?? string.Empty).Trim();
+        net.BypassList = (ProxyBypassBox.Text ?? string.Empty).Trim();
+        net.FallbackToDirectOnProxyFailure = ProxyFallbackBox.IsChecked == true;
+    }
+
+    private void UpdateNetworkStatus()
+    {
+        try
+        {
+            var cfg = AppServices.Current.Config.Config.Network;
+            var mode = cfg?.ProxyMode ?? "auto";
+            var lines = new List<string>
+            {
+                "当前生效：" + QBank.Core.HttpClients.DescribeCurrentProxy()
+            };
+
+            var note = QBank.Core.HttpClients.AutoFallbackNote;
+            if (!string.IsNullOrEmpty(note)) lines.Add("· " + note);
+
+            if (mode == "auto")
+            {
+                var dead = DetectDeadSystemProxy(out var desc);
+                if (string.IsNullOrEmpty(desc))
+                    lines.Add("· 系统没有设置代理。");
+                else if (dead)
+                    lines.Add($"· 检测到系统代理 {desc}，但这个端口没人监听 —— 保存后本程序会自动绕过它。");
+                else
+                    lines.Add($"· 系统代理 {desc} 可访问。");
+            }
+
+            lines.Add("· 这一项对 AI 模型、自定义接口、在线题库、模型列表全部生效，不用重启。");
+            NetworkStatusText.Text = string.Join("\n", lines);
+        }
+        catch (Exception ex)
+        {
+            NetworkStatusText.Text = "读取网络状态失败：" + ex.Message;
+        }
+    }
+
+    private static bool DetectDeadSystemProxy(out string description)
+        => QBank.Core.HttpClients.DescribeSystemProxyState(out description, out var dead) && dead;
+
+    private void OnRefreshNetwork(object sender, RoutedEventArgs e) => UpdateNetworkStatus();
+
+    private async void OnTestNetwork(object sender, RoutedEventArgs e)
+    {
+        NetworkStatusText.Text = "正在用第一个启用的模型试一下…";
+        try
+        {
+            var cfg = AppServices.Current.Config.Config;
+            var provider = AiAnswerService.SelectProviders(cfg.AiProviders).FirstOrDefault();
+            if (provider is null)
+            {
+                NetworkStatusText.Text = "没有启用的服务商，先在「AI 模型管理」里勾一个。";
+                return;
+            }
+
+            var catalog = AppServices.Current.ModelCatalog;
+            var result = await catalog.FetchAsync(provider);
+            if (result.Ok)
+            {
+                NetworkStatusText.Text = $"通了 ✓  {provider.Name} 返回 {result.Models.Count} 个模型（{QBank.Core.HttpClients.DescribeCurrentProxy()}）";
+            }
+            else
+            {
+                NetworkStatusText.Text = $"{provider.Name} 还是不通：{result.Error}\n当前出口：{QBank.Core.HttpClients.DescribeCurrentProxy()}";
+            }
+        }
+        catch (Exception ex)
+        {
+            NetworkStatusText.Text = "测试失败：" + ex.Message;
+        }
+    }
+
     // ── OCS 对接口 ────────────────────────────────────────
 
     private void UpdateOcsBridgeStatus()
@@ -674,10 +806,12 @@ public sealed partial class SettingsPage : Page
 
             ApplyOcrSettingsToConfig();
             ApplyOcsBridgeToConfig();
+            ApplyNetworkToConfig();
 
             AppServices.Current.SaveConfig();
             UpdateOcrDescribe();
             UpdateOcsBridgeStatus();
+            UpdateNetworkStatus();
             HeaderHint.Text = $"已保存 · {DateTimeOffset.Now:HH:mm:ss}";
         }
         catch (Exception ex)

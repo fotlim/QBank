@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -25,13 +25,12 @@ public sealed class AnswerWrapperHandler
 {
     public const string DefaultHandler = "return (res)=> [JSON.stringify(res), undefined]";
 
-    private readonly HttpClient _http;
+    private readonly HttpClient? _httpOverride;
+
+    private HttpClient _http => _httpOverride ?? HttpClients.Shared;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Dictionary<string, string>> _jsStorage = new();
 
-    public AnswerWrapperHandler(HttpClient? http = null)
-    {
-        _http = http ?? HttpClients.Shared;
-    }
+    public AnswerWrapperHandler(HttpClient? http = null) => _httpOverride = http;
 
     /// <summary>单个题库的请求超时（OCS 默认 60 秒）。</summary>
     public int TimeoutSeconds { get; set; } = 60;

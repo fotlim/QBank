@@ -33,6 +33,9 @@ public sealed class AppConfig
     /// <summary>手动添加 / 自动发现的局域网题库。</summary>
     public List<LanPeerConfig> LanPeers { get; set; } = new();
 
+    /// <summary>网络出口设置（代理）。</summary>
+    public NetworkConfig Network { get; set; } = new();
+
     /// <summary>首次运行写入演示与预设。</summary>
     public static AppConfig CreateDefault()
     {
@@ -406,4 +409,129 @@ public sealed class CustomOcrConfig
 
     /// <summary>从响应 JSON 中取识别文本的点分路径，例如 data.text / result.0.text。</summary>
     public string ResultPath { get; set; } = "text";
+}
+/// <summary>网络出口设置：解决系统代理把请求送去没在跑的本地端口。</summary>
+public sealed class NetworkConfig
+{
+    /// <summary>
+    /// 代理模式：
+    ///   auto   = 跟随系统代理（默认；Fiddler/Clash 开着就自动走）
+    ///   direct = 直连，忽略系统代理（最常见的问题就是系统代理指向了没开的本地端口）
+    ///   custom = 用下面填的代理地址
+    /// </summary>
+    public string ProxyMode { get; set; } = "auto";
+
+    /// <summary>custom 模式下的代理地址，例如 http://127.0.0.1:7890。</summary>
+    public string ProxyUrl { get; set; } = string.Empty;
+
+    /// <summary>proxy 模式下不走代理的域名（分号分隔，支持 *.example.com）。</summary>
+    public string BypassList { get; set; } = "localhost;127.0.0.1;*.local;10.*;192.168.*;172.16.*;172.17.*;172.18.*;172.19.*;172.2*;172.30.*;172.31.*";
+
+    /// <summary>
+    /// 「跟随系统代理」时，如果系统代理指向的本机端口根本没人监听，
+    /// 就自动改走直连 —— 免得一条过期的注册表把整个软件废掉。
+    /// </summary>
+    public bool FallbackToDirectOnProxyFailure { get; set; } = true;
+
+    /// <summary>构建 HttpClient 用的 WebProxy；返回 null 表示直连。</summary>
+    public System.Net.IWebProxy? BuildProxy()
+    {
+        switch ((ProxyMode ?? "auto").Trim().ToLowerInvariant())
+        {
+            case "direct":
+                return null;
+            case "custom":
+                if (string.IsNullOrWhiteSpace(ProxyUrl))
+                    return null;
+                return new System.Net.WebProxy(ProxyUrl.Trim()) { BypassList = ToBypassRegexes() };
+            default:
+                // auto：沿用系统代理（HttpClient 不显式设置时就是系统默认行为）
+                return System.Net.Http.HttpClient.DefaultProxy;
+        }
+    }
+
+    /// <summary>
+    /// 把用户填的通配符（*.local、10.*、127.0.0.1）翻译成 WebProxy 要的正则。
+    /// <para>
+    /// ⚠️ <c>WebProxy.BypassList</c> 的元素是<b>正则表达式</b>，不是通配符 —— 直接把
+    /// "*.local" 塞进去会在构造时抛 <c>RegexParseException: Quantifier '*' following nothing</c>，
+    /// 让整个代理构建失败、连带所有请求报废。这个坑踩过一次，记住。
+    /// </para>
+    /// </summary>
+    private string[] ToBypassRegexes()
+    {
+        var raw = (BypassList ?? string.Empty)
+            .Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        var result = new List<string>(raw.Length);
+        foreach (var item in raw)
+        {
+            var regex = GlobToRegex(item);
+            if (regex is null) continue;
+
+            // 用户可能自己就填的正则（含模糊字面量），先验证一下，坏的直接丢掉，
+            // 不能让一条笔误把整个网络出口搞崩。
+            try
+            {
+                _ = new System.Text.RegularExpressions.Regex(regex);
+                result.Add(regex);
+            }
+            catch (ArgumentException)
+            {
+                // 忽略这一条
+            }
+        }
+        return result.ToArray();
+    }
+
+    /// <summary>
+    /// 通配符 → 正则：<c>*</c> 换成 <c>.*</c>、<c>?</c> 换成 <c>.</c>，
+    /// 其余字符转义。用户直接写正则（例如 <c>^10\.</c>）时原样保留。
+    /// </summary>
+    private static string? GlobToRegex(string pattern)
+    {
+        var p = pattern.Trim();
+        if (p.Length == 0) return null;
+
+        // 看起来已经是正则（有元字符且不是纯通配符），原样返回
+        var looksLikeRegex = p.StartsWith('^') || p.EndsWith('$') ||
+                             p.Contains("\\.") || p.Contains("(?") || p.Contains('|');
+        if (looksLikeRegex) return p;
+
+        var sb = new System.Text.StringBuilder("^");
+        foreach (var ch in p)
+        {
+            switch (ch)
+            {
+                case '*':
+                    sb.Append(".*");
+                    break;
+                case '?':
+                    sb.Append('.');
+                    break;
+                default:
+                    sb.Append(System.Text.RegularExpressions.Regex.Escape(ch.ToString()));
+                    break;
+            }
+        }
+        // 域名后缀（*.local）也要能匹配到 .local 本身和任意子域
+        if (p.StartsWith("*."))
+        {
+            var bare = p[2..];
+            sb.Clear();
+            sb.Append("(^|.*\\.)").Append(System.Text.RegularExpressions.Regex.Escape(bare)).Append("$");
+            return sb.ToString();
+        }
+
+        sb.Append('$');
+        return sb.ToString();
+    }
+
+    /// <summary>配置的一句话描述，界面上显示用。</summary>
+    public string Describe() => (ProxyMode ?? "auto").Trim().ToLowerInvariant() switch
+    {
+        "direct" => "直连（忽略系统代理）",
+        "custom" => string.IsNullOrWhiteSpace(ProxyUrl) ? "自定义代理（未填地址，按直连）" : "自定义代理 " + ProxyUrl.Trim(),
+        _ => "跟随系统代理",
+    };
 }

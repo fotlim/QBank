@@ -62,6 +62,9 @@ public sealed class AppServices
 
         if (Config.FallbackNote is not null) Log(Config.FallbackNote);
 
+        // 把网络出口设置灌给 HTTP 工厂：系统代理指向死端口时，AI 请求会全部失败
+        ApplyNetworkConfig();
+
         try
         {
             Bank = new LocalBank(Config.DatabaseFile);
@@ -125,10 +128,25 @@ public sealed class AppServices
             Config.Save();
             Lan.ApplyConfig(Config.Config);
             ApplyOcsBridge();
+            ApplyNetworkConfig();
         }
         catch (Exception ex)
         {
             Log("保存配置失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>把「网络出口」设置交给 HTTP 工厂（代理模式变了要重建客户端）。</summary>
+    public void ApplyNetworkConfig()
+    {
+        try
+        {
+            QBank.Core.HttpClients.Network = Config.Config.Network;
+            Log("网络出口：" + QBank.Core.HttpClients.DescribeCurrentProxy());
+        }
+        catch (Exception ex)
+        {
+            Log("应用网络设置失败：" + ex.Message);
         }
     }
 

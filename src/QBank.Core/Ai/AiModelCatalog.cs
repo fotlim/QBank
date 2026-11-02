@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text.Json;
 using QBank.Core.Models;
 
@@ -70,9 +70,11 @@ public sealed class AiModelListResult
 /// </summary>
 public sealed class AiModelCatalog
 {
-    private readonly HttpClient _http;
+    private readonly HttpClient? _httpOverride;
 
-    public AiModelCatalog(HttpClient? http = null) => _http = http ?? HttpClients.Shared;
+    public AiModelCatalog(HttpClient? http = null) => _httpOverride = http;
+
+    private HttpClient _http => _httpOverride ?? HttpClients.Shared;
 
     /// <summary>把 BaseUrl 补全成 models 列表地址。</summary>
     public static string ResolveModelsEndpoint(AiProviderConfig provider, bool ollamaNative = false)
@@ -191,13 +193,13 @@ public sealed class AiModelCatalog
         catch (HttpRequestException ex)
         {
             result.Ok = false;
-            result.Error = "网络请求失败：" + ex.Message;
+            result.Error = HttpClients.ExplainNetworkError(ex);
             return result;
         }
         catch (Exception ex)
         {
             result.Ok = false;
-            result.Error = ex.Message;
+            result.Error = HttpClients.ExplainNetworkError(ex);
             return result;
         }
     }

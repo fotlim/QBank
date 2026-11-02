@@ -24,12 +24,13 @@ QBank 把这些合成一个窗口：**输入题干（或者直接截图）→ �
 | 🌐 | **局域网共享** | 把自己变成题库服务器，UDP 自动发现同网段机器，互相查题、互相同步题库 |
 | 🕘 | **搜索历史** | 每次搜题的来源、分数、耗时全记录，可一键「再搜一次」 |
 | ↔️ | **反向输出给 OCS** | 把自己包装成标准 OCS 题库，让 OCS 脚本用上你的本地题库和 AI |
+| 🔌 | **网络出口可切换** | 跟随系统代理 / 强制直连 / 自定义代理；系统代理指向死端口时自动绕过，不再满屏「目标计算机积极拒绝」 |
 
 ## 安装
 
 到 [Releases](https://github.com/fotlim/QBank/releases) 下载，两种形式任选：
 
-### 安装版 `QBank-Setup-1.0.1.exe`
+### 安装版 `QBank-Setup-1.0.2.exe`
 
 双击安装，**安装路径可以随便改**（默认 `%LOCALAPPDATA%\Programs\QBank`，装到 `D:\Tools\QBank` 也行，路径带空格或中文都没问题）。
 
@@ -38,7 +39,7 @@ QBank 把这些合成一个窗口：**输入题干（或者直接截图）→ �
 - 可选任务：「开机自动启动」「数据跟程序放一起（便携模式）」
 - 卸载时会问要不要连题库数据一起删，默认保留
 
-### 绿色版 `QBank-1.0.1-portable.zip`
+### 绿色版 `QBank-1.0.2-portable.zip`
 
 解压到任意目录，双击 `QBank.exe` 就能跑，不写注册表、不留痕迹。
 想让数据跟着程序走（比如放 U 盘里），在 exe 旁边新建一个空文件 `portable.txt`。
@@ -48,7 +49,7 @@ QBank 把这些合成一个窗口：**输入题干（或者直接截图）→ �
 > 这是 `%TEMP%` 被安全软件、组策略或系统加固工具限制导致的，不是安装包的问题——Inno Setup 启动时必须先在临时目录里解出真实安装程序。
 > 两个办法任选：
 > 1. **直接用绿色版 zip**（推荐，它不依赖临时目录）；
-> 2. 或者把安装包移到别的目录再跑，或手动指定临时目录：`QBank-Setup-1.0.1.exe /TEMP=D:\temp`。
+> 2. 或者把安装包移到别的目录再跑，或手动指定临时目录：`QBank-Setup-1.0.2.exe /TEMP=D:\temp`。
 
 
 ## 界面
@@ -60,6 +61,10 @@ QBank 把这些合成一个窗口：**输入题干（或者直接截图）→ �
 | 局域网共享 | OCS 对接 |
 | --- | --- |
 | ![局域网](docs/04-lan.png) | ![OCS 对接](docs/05-ocs-bridge.png) |
+
+| 网络出口（代理） |
+| --- |
+| ![网络出口](docs/06-network.png) |
 
 ## 技术栈
 
@@ -114,7 +119,7 @@ dotnet publish src\QBank.App\QBank.App.csproj -c Release -r win-x64 --self-conta
 & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" install\qbank.iss
 ```
 
-产物在 `install\Output\QBank-Setup-1.0.0.exe`，232 MB 的内容压到约 63 MB。
+产物在 `install\Output\QBank-Setup-1.0.2.exe`，232 MB 的内容压到约 63 MB。
 
 **便携模式**：在 exe 同目录放一个 `portable.txt`（或 `portable` 文件夹），数据就存到 `exe\data`，不碰 `%LOCALAPPDATA%`。
 
@@ -149,7 +154,7 @@ dotnet publish src\QBank.App\QBank.App.csproj -c Release -r win-x64 --self-conta
 
 ### 局域网共享
 
-见第 6 节。
+见第 7 节。
 
 ### 设置
 
@@ -157,6 +162,8 @@ dotnet publish src\QBank.App\QBank.App.csproj -c Release -r win-x64 --self-conta
 - **在线题库（OCS）**：粘贴 JSON / 链接 / Base64 导入，导出的 JSON 能直接粘回 OCS
 - **图片识题**：选引擎、配参数、一键自检
 - **搜题选项**：超时、并发、缓存命中阈值、自动入库阈值
+- **网络出口**：代理模式（跟随系统 / 直连 / 自定义），解决"关了代理软件就全报网络错误"的坑
+- **OCS 对接**：开本机题库接口，让 OCS 脚本能直接来问
 - **数据与存储**：数据目录、打开目录、备份数据库、题库统计
 
 ---
@@ -187,7 +194,67 @@ dotnet publish src\QBank.App\QBank.App.csproj -c Release -r win-x64 --self-conta
 
 ---
 
-## 4. 导入 OCS 在线题库
+## 4. 网络出口（代理）
+
+这一节值得单独看 —— 它是最容易被忽略、又最能把人卡住的一项。
+
+### 症状
+
+搜题时返回类似：
+
+```
+AI 模型：网络请求失败：由于目标计算机积极拒绝，无法连接。 (127.0.0.1:12000)
+```
+
+或者「获取模型」拉不到列表、自定义接口也连不上。**这不是 Key 的问题，也不是网络的问题**，是系统代理把自己坑了。
+
+### 原因
+
+Windows 的「Internet 选项 → 局域网设置」里存着一个代理地址。开着 Clash / Fiddler 时它指向 `127.0.0.1:7890` 之类；关掉软件后，**这个注册表值不会被清掉**：
+
+```
+HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings
+    ProxyEnable = 1
+    ProxyServer = 127.0.0.1:12000    ← 软件已经关了，这个端口没人监听
+```
+
+于是每一个走系统代理的 HTTP 请求都被送去一个空端口，立刻被拒绝。浏览器有时能用是因为它的白名单里正好有这个域名 —— 你可以在 `ProxyOverride` 里看到 `www.siliconflow.cn` 却没有 `api.siliconflow.cn`，于是网页能开、程序不能连。
+
+### 怎么办
+
+设置页 →「网络出口」卡片，三选一：
+
+| 模式 | 什么时候用 |
+| --- | --- |
+| **跟随系统代理**（默认） | 你开着代理软件，希望程序也跟着走 |
+| **直连（忽略系统代理）** | 关代理后全报错，或者你根本不走代理 —— 选这个最省事 |
+| **自定义代理** | 想指定一个跟系统不一样的代理，比如 `http://127.0.0.1:7890` |
+
+改完点「保存设置」，**立刻生效，不用重启**（HTTP 客户端会重建）。
+
+### 自动兜底
+
+默认勾着「跟随系统代理时，如果代理指向的本机端口没在监听，自动改走直连」。开启后：
+
+- 程序每次建 HTTP 客户端时会探一下那个端口（200ms 超时，不拖慢启动）
+- 没人监听 → 直接绕过它，日志里记一条 `系统代理 http://127.0.0.1:12000 没有响应，已自动改走直连。`
+- 卡片的「当前生效」那一行也会写明当前到底走了哪条路
+
+判定同时看两处：`.NET` 自己的 `HttpClient.DefaultProxy` 解析结果，以及注册表原文 —— 有些进程环境下前者读不到系统代理，只看一条会漏。
+
+### 这一项管到哪些请求
+
+AI 模型、模型列表拉取、自定义接口、OCS 在线题库、局域网节点、Ollama 视觉识题 —— **全部**。改一处，全通。
+
+### 还是不通？
+
+1. 点卡片上的「用第一个可用模型试一下」，它会真的打一次接口并把结果写在下面
+2. 如果报 401/403 那是 Key 的事，跟代理无关
+3. 如果是自建 HTTPS 服务报证书错，在服务商「高级参数」里允许不安全证书
+
+---
+
+## 5. 导入 OCS 在线题库
 
 完全兼容 [OCS 的 AnswererWrapper 规范](https://docs.ocsjs.com/docs/other/api#AnswererWrapper)。设置页 →「在线题库」→ 粘贴下面任一形式 → 导入：
 
@@ -222,7 +289,7 @@ dotnet publish src\QBank.App\QBank.App.csproj -c Release -r win-x64 --self-conta
 
 ---
 
-## 5. 图片识题
+## 6. 图片识题
 
 搜题页有两个按钮：「截图识题」（截整个屏幕）和「选图片」（从文件选）。识别完自动填进题干和选项框。
 
@@ -241,7 +308,7 @@ Umi-OCR 优先走它的 HTTP 接口（默认 `127.0.0.1:1224`，注意 Umi-OCR �
 
 ---
 
-## 6. 局域网题库共享
+## 7. 局域网题库共享
 
 ### 当服务端（把题库借给别人查）
 
@@ -269,7 +336,7 @@ Umi-OCR 优先走它的 HTTP 接口（默认 `127.0.0.1:1224`，注意 Umi-OCR �
 
 ---
 
-## 7. 给 OCS 提供题库（让 OCS 脚本自动答题）
+## 8. 给 OCS 提供题库（让 OCS 脚本自动答题）
 
 这一节是整个程序最有意思的部分：把 QBank 变成一个**OCS 能直接调用的题库接口**，于是 OCS 脚本收题时就会来问本程序，答案可以由本地题库、局域网邻居、甚至大模型给出。
 
@@ -341,24 +408,24 @@ CORS 已放开（含 Chrome 私有网络访问需要的 `Access-Control-Allow-Pr
 
 ---
 
-## 8. 命令行自测
+## 9. 命令行自测
 
 `src\QBank.Cli` 是一套离线端到端自测，内置 mock 的 OCS 题库 / OpenAI 兼容接口 / 局域网服务，**不联网、不花 token**：
 
 ```powershell
-dotnet run --project src\QBank.Cli\QBank.Cli.csproj -c Debug                # 常规 16 项
-dotnet run --project src\QBank.Cli\QBank.Cli.csproj -c Debug -- --ocr       # 加上本机 Umi-OCR 实机识别（17 项）
+dotnet run --project src\QBank.Cli\QBank.Cli.csproj -c Debug                # 常规 17 项
+dotnet run --project src\QBank.Cli\QBank.Cli.csproj -c Debug -- --ocr       # 加上本机 Umi-OCR 实机识别（18 项）
 dotnet run --project src\QBank.Cli\QBank.Cli.csproj -c Debug -- --verbose   # 打印每项断言
 dotnet run --project src\QBank.Cli\QBank.Cli.csproj -c Debug -- --only 局域网 # 只跑名字含「局域网」的
 ```
 
-覆盖：相似度打分、题型推断、答案切分（含代码题保护）、OCS 配置校验（错误文案逐字比对）、JS handler 执行与 localStorage、OCS GET/POST 请求、AI 答题（含 json 模式被 400 拒绝后的自动重试）、模型列表拉取（OpenAI 风格 + Ollama 原生）、本地题库增删查、导入导出、历史记录、局域网服务端与客户端（含口令校验）、**OCS 对接口（起真 HTTP 服务 + 把生成的 handler 丢进 JS 引擎跑一遍）**、OCR 题干切分、搜题总编排（多来源并发 + 缓存短路）。
+覆盖：相似度打分、题型推断、答案切分（含代码题保护）、OCS 配置校验（错误文案逐字比对）、JS handler 执行与 localStorage、OCS GET/POST 请求、AI 答题（含 json 模式被 400 拒绝后的自动重试）、模型列表拉取（OpenAI 风格 + Ollama 原生）、**网络出口（死代理绕行、端口探活、代理对象构建）**、本地题库增删查、导入导出、历史记录、局域网服务端与客户端（含口令校验）、**OCS 对接口（起真 HTTP 服务 + 把生成的 handler 丢进 JS 引擎跑一遍）**、OCR 题干切分、搜题总编排（多来源并发 + 缓存短路）。
 
 退出码 0 = 全过。
 
 ---
 
-## 9. 项目结构
+## 10. 项目结构
 
 ```
 QBank/
@@ -385,7 +452,7 @@ QBank/
 
 ---
 
-## 10. 常见问题
+## 11. 常见问题
 
 **点搜题没反应 / 没结果**
 先看结果区的来源卡片，每个来源都会写失败原因。最常见是没配 API Key（401）、BaseUrl 少了 `/v1`（404）、或者一个来源都没勾。
@@ -411,9 +478,15 @@ QBank/
 **在 OCS 里改了口令但本程序没改**
 两边必须一致。本程序改完口令要「保存设置」才会重建服务，OCS 那边也要重新导入配置。
 
+**报「由于目标计算机积极拒绝，无法连接 (127.0.0.1:xxxxx)」**
+系统代理残留。关掉代理软件后 Windows 不会清掉 `ProxyServer` 注册表值，请求全被送去一个死端口。到设置 →「网络出口」选**直连**保存即可，详见第 4 节。
+
+**自定义接口 / 自建网关也连不上**
+跟上面同一个原因 —— 网络出口是全局的，对自定义接口一样生效。改成直连就行。
+
 ---
 
-## 11. 已知限制
+## 12. 已知限制
 
 - 目前只支持 Windows（WinUI 3 + Windows.Media.Ocr + 系统截屏都是 Windows 专属）。
 - 「截图识题」是全屏抓图，没有做框选区域。
