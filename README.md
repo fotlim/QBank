@@ -1,4 +1,4 @@
-﻿# 题库工坊 QBank
+# 题库工坊 QBank
 
 > 一个用 **WinUI 3** 写的 Windows 题库软件：把 OCS 在线题库、大模型 API、本地题库、局域网共享、图片识题放在同一个界面里，粘贴题干就能出答案，答过的题自动攒成自己的题库。
 
@@ -27,13 +27,29 @@ QBank 把这些合成一个窗口：**输入题干（或者直接截图）→ �
 
 ## 安装
 
-到 [Releases](https://github.com/fotlim/QBank/releases) 下载 `QBank-Setup-1.0.0.exe`，双击安装。
+到 [Releases](https://github.com/fotlim/QBank/releases) 下载，两种形式任选：
 
-- 安装包**自带 .NET 运行时和 Windows App SDK**，用户机器不用另装任何东西
-- 按用户安装（装到 `%LOCALAPPDATA%\Programs\QBank`），**不需要管理员权限**，不弹 UAC
+### 安装版 `QBank-Setup-1.0.1.exe`
+
+双击安装，**安装路径可以随便改**（默认 `%LOCALAPPDATA%\Programs\QBank`，装到 `D:\Tools\QBank` 也行，路径带空格或中文都没问题）。
+
+- 自带 .NET 运行时和 Windows App SDK，目标机不用另装任何东西
+- 按用户安装，**不需要管理员权限**，不弹 UAC
+- 可选任务：「开机自动启动」「数据跟程序放一起（便携模式）」
 - 卸载时会问要不要连题库数据一起删，默认保留
 
-也可以下绿色版：把 `publish` 目录整个拷走直接跑 `QBank.exe`。
+### 绿色版 `QBank-1.0.1-portable.zip`
+
+解压到任意目录，双击 `QBank.exe` 就能跑，不写注册表、不留痕迹。
+想让数据跟着程序走（比如放 U 盘里），在 exe 旁边新建一个空文件 `portable.txt`。
+
+> **安装器报「安装程序无法创建目录 …is-XXXX.tmp / 错误 5: 拒绝访问」怎么办**
+>
+> 这是 `%TEMP%` 被安全软件、组策略或系统加固工具限制导致的，不是安装包的问题——Inno Setup 启动时必须先在临时目录里解出真实安装程序。
+> 两个办法任选：
+> 1. **直接用绿色版 zip**（推荐，它不依赖临时目录）；
+> 2. 或者把安装包移到别的目录再跑，或手动指定临时目录：`QBank-Setup-1.0.1.exe /TEMP=D:\temp`。
+
 
 ## 界面
 

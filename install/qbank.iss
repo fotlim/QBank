@@ -9,7 +9,7 @@
 
 #define AppName "题库工坊"
 #define AppNameEn "QBank"
-#define AppVersion "1.0.0"
+#define AppVersion "1.0.1"
 #define AppPublisher "Escape-Lin"
 #define AppUrl "https://github.com/fotlim/QBank"
 #define AppExeName "QBank.exe"
@@ -30,9 +30,16 @@ DefaultDirName={localappdata}\Programs\{#AppNameEn}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 
-; 按用户安装，不需要管理员
+; 一定要显示「选择安装位置」页。
+; Inno 的默认值 auto 在 PrivilegesRequired=lowest（纯用户安装）时会自动隐藏目录页，
+; 用户就没法改路径了 —— 所以显式设成 no。
+DisableDirPage=no
+; 目录页上允许手输，也允许浏览；路径可以带空格
+DirExistsWarning=auto
+
+; 按用户安装，不需要管理员；但允许用户主动选择「为所有用户安装」
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
+PrivilegesRequiredOverridesAllowed=dialog commandline
 
 ; 单实例只读数据放用户目录，装到 Program Files 也能用
 OutputDir=Output
@@ -61,16 +68,15 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
 Name: "startupicon"; Description: "开机自动启动 {#AppName}"; GroupDescription: "启动选项"; Flags: unchecked
+Name: "portablemode"; Description: "数据跟程序放一起（便携模式，配置和题库存到安装目录的 data）"; GroupDescription: "数据位置"; Flags: unchecked
 
 [Files]
 Source: "{#BuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-; 便携模式开关：想让数据跟着程序走，把下面这行取消注释
-; Source: "portable.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
-Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: startupicon
+Name: "{autostartup}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: startupicon
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
@@ -81,6 +87,15 @@ Type: files; Name: "{app}\startup.log"
 Type: filesandordirs; Name: "{app}\data"
 
 [Code]
+// 便携模式：装完在程序目录写一个 portable.txt，程序启动时就认它
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and WizardIsTaskSelected('portablemode') then
+    SaveStringToFile(ExpandConstant('{app}\portable.txt'),
+      'QBank portable mode. Data is stored in the "data" folder next to QBank.exe.' + #13#10 +
+      'Delete this file to use the default location.' + #13#10, False);
+end;
+
 // 卸载时问一句要不要连数据一起删
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
@@ -89,7 +104,12 @@ var
 begin
   if CurUninstallStep = usPostUninstall then
   begin
-    DataDir := ExpandConstant('{localappdata}\QBank');
+    // 便携模式下数据就在 {app}\data，优先判断它
+    if FileExists(ExpandConstant('{app}\portable.txt')) then
+      DataDir := ExpandConstant('{app}\data')
+    else
+      DataDir := ExpandConstant('{localappdata}\QBank');
+
     if not DirExists(DataDir) then
       DataDir := ExpandConstant('{app}\data');
 
