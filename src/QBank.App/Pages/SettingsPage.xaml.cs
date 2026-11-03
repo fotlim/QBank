@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -19,6 +19,18 @@ public sealed partial class SettingsPage : Page
     private readonly List<ProviderCard> _cards = new();
     private bool _loading;
 
+    private List<SettingsGroup> _groups = new();
+    private bool _navSuppressed;
+
+    /// <summary>左侧分类的一项。</summary>
+    private sealed class SettingsGroup
+    {
+        public string Key { get; set; } = string.Empty;
+        public string Glyph { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string Subtitle { get; set; } = string.Empty;
+    }
+
     public SettingsPage()
     {
         InitializeComponent();
@@ -29,13 +41,110 @@ public sealed partial class SettingsPage : Page
     {
         if (_cards.Count > 0) return; // 页面被缓存，避免重复加载
         BuildPresetMenu();
+        BuildGroupNav();
         ReloadFromConfig();
         ApplyDebugScroll();
+
+        // 从引导跳进来时指定了分类，等控件都建好了再切
+        if (_pendingGroup is not null)
+        {
+            ShowGroup(_pendingGroup);
+            _pendingGroup = null;
+        }
+    }
+
+    private string? _pendingGroup;
+
+    /// <summary>外部（上手引导、快捷跳转）指定要显示哪一类。</summary>
+    public void FocusGroup(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key)) return;
+
+        var normalized = key.Trim().ToLowerInvariant();
+        if (_groups.Count == 0)
+        {
+            _pendingGroup = normalized; // 页面还没加载完，存着等 OnLoaded
+            return;
+        }
+
+        ShowGroup(normalized);
+    }
+
+    private void OnReplayOnboarding(object sender, RoutedEventArgs e)
+    {
+        (App.MainAppWindow as MainWindow)?.ReplayOnboarding();
     }
 
     /// <summary>
-    /// 调试用：环境变量 QBANK_SCROLL_TO=ocs 时，加载后自动滚到对应卡片，
-    /// 方便截图核验长页面下半部分（自动化截图没法可靠地模拟滚轮）。
+    /// 建左侧分类。设置项一多，一列滚到底就找不到东西了，所以按用途分成五类，
+    /// 并且按「第一次该怎么配」的顺序编号，从上往下过一遍就配完了。
+    /// </summary>
+    private void BuildGroupNav()
+    {
+        _groups = new List<SettingsGroup>
+        {
+            new()
+            {
+                Key = "models", Glyph = "\uE774", Title = "1 · 模型与网络",
+                Subtitle = "配好一个模型就能查题；连不上也在这里查",
+            },
+            new()
+            {
+                Key = "sources", Glyph = "\uE8F1", Title = "2 · 题库来源",
+                Subtitle = "别人的题库搬进来，自己的题库给出去",
+            },
+            new()
+            {
+                Key = "ocr", Glyph = "\uE91B", Title = "3 · 图片识题",
+                Subtitle = "截图或选图片，自动认成题干",
+            },
+            new()
+            {
+                Key = "prefs", Glyph = "\uE713", Title = "4 · 使用偏好",
+                Subtitle = "搜题行为、窗口与托盘",
+            },
+            new()
+            {
+                Key = "data", Glyph = "\uE8B7", Title = "5 · 数据与备份",
+                Subtitle = "换机器、重装系统不用重填",
+            },
+        };
+
+        GroupNav.ItemsSource = _groups;
+        GroupNav.SelectedIndex = 0;
+    }
+
+    /// <summary>切换右侧显示的分类。</summary>
+    private void ShowGroup(string key)
+    {
+        GroupModels.Visibility = key == "models" ? Visibility.Visible : Visibility.Collapsed;
+        GroupSources.Visibility = key == "sources" ? Visibility.Visible : Visibility.Collapsed;
+        GroupOcr.Visibility = key == "ocr" ? Visibility.Visible : Visibility.Collapsed;
+        GroupPrefs.Visibility = key == "prefs" ? Visibility.Visible : Visibility.Collapsed;
+        GroupData.Visibility = key == "data" ? Visibility.Visible : Visibility.Collapsed;
+
+        // 同步左导航选中（若这次是导航触发的就不用再设回去，避免递归）
+        var idx = _groups.FindIndex(g => g.Key == key);
+        if (idx >= 0 && GroupNav.SelectedIndex != idx && !_navSuppressed)
+        {
+            _navSuppressed = true;
+            GroupNav.SelectedIndex = idx;
+            _navSuppressed = false;
+        }
+
+        // 换了一组，回到顶部，否则会停在上次的滚动位置
+        ContentScroll.ChangeView(null, 0, null, true);
+    }
+
+    private void OnGroupSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_navSuppressed) return;
+        if (GroupNav.SelectedItem is SettingsGroup group) ShowGroup(group.Key);
+    }
+
+    /// <summary>
+    /// 调试用：环境变量 QBANK_SCROLL_TO=ocs 时，加载后自动切到对应分类并滚到对应卡片，
+    /// 方便截图核验（自动化截图没法可靠地模拟滚轮）。
     /// </summary>
     private void ApplyDebugScroll()
     {
@@ -46,35 +155,50 @@ public sealed partial class SettingsPage : Page
         {
             switch (target.Trim().ToLowerInvariant())
             {
+                case "models":
+                case "ai":
+                    ShowGroup("models");
+                    break;
                 case "ocs-bridge":
                 case "ocsbridge":
                 case "bridge":
+                    ShowGroup("sources");
                     OcsBridgeCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
                     break;
                 case "ocr":
-                    OcrCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
+                    ShowGroup("ocr");
                     break;
                 case "search":
                 case "searchopts":
+                    ShowGroup("prefs");
                     SearchOptionsCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
                     break;
+                case "prefs":
+                case "preferences":
+                    ShowGroup("prefs");
+                    break;
                 case "data":
+                    ShowGroup("data");
                     DataCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
                     break;
                 case "tray":
                 case "window":
+                    ShowGroup("prefs");
                     WindowCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
                     break;
                 case "backup":
                 case "restore":
+                    ShowGroup("data");
                     BackupCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
                     break;
                 case "net":
                 case "network":
                 case "proxy":
+                    ShowGroup("models");
                     NetworkCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
                     break;
                 case "ocs":
+                    ShowGroup("sources");
                     OcsListCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
                     break;
                 default:

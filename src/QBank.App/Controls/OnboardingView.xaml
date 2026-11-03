@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="QBank.App.Controls.OnboardingView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled">
+            <Border Style="{StaticResource CardBorder}" MaxWidth="860" Margin="28"
+                    VerticalAlignment="Center" Padding="28">
+                <StackPanel Spacing="16">
+
+                    <!-- 头部 -->
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Grid.Column="0" Glyph="&#xE8F1;" FontSize="20" VerticalAlignment="Center"
+                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                        <TextBlock Grid.Column="1" Text="欢迎用题库工坊" FontSize="18" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" />
+                        <TextBlock x:Name="StepText" Grid.Column="2" Style="{StaticResource Subtle}"
+                                   VerticalAlignment="Center" />
+                    </Grid>
+
+                    <!-- 步骤圆点 -->
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Border x:Name="Dot1" Width="26" Height="4" CornerRadius="2" Opacity="0.25"
+                                Background="{ThemeResource AccentFillColorDefaultBrush}" />
+                        <Border x:Name="Dot2" Width="26" Height="4" CornerRadius="2" Opacity="0.25"
+                                Background="{ThemeResource AccentFillColorDefaultBrush}" />
+                        <Border x:Name="Dot3" Width="26" Height="4" CornerRadius="2" Opacity="0.25"
+                                Background="{ThemeResource AccentFillColorDefaultBrush}" />
+                        <Border x:Name="Dot4" Width="26" Height="4" CornerRadius="2" Opacity="0.25"
+                                Background="{ThemeResource AccentFillColorDefaultBrush}" />
+                    </StackPanel>
+
+                    <!-- 第 1 步：这是什么 -->
+                    <StackPanel x:Name="Pane1" Spacing="14">
+                        <TextBlock FontSize="15" TextWrapping="Wrap"
+                                   Text="它把分散在各处的答案捞到同一个窗口里，帮你把题查出来。" />
+
+                        <Grid ColumnSpacing="12" RowSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource CardBorder}">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="📚  本地题库" FontWeight="SemiBold" />
+                                    <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                               Text="搜过的题自动记下来。下次同一题秒出答案，不再花 token。越用越快。" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource CardBorder}">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="🖥️  局域网共享" FontWeight="SemiBold" />
+                                    <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                               Text="同一个 Wi-Fi 下的同学的题库可以互相借，谁搜到过谁就出答案。" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource CardBorder}">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="🌐  在线题库" FontWeight="SemiBold" />
+                                    <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                               Text="有 OCS 的题库配置的话，粘进来就能一起查，跟原来用 OCS 一样。" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource CardBorder}">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="🤖  AI 模型" FontWeight="SemiBold" />
+                                    <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                               Text="哪都没有的题，交给大模型答。支持 DeepSeek、硅基流动、阿里云百炼，也能接本机 Ollama。" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                   Text="下面三步都是可选的，先花一分钟过一遍，后面少走弯路。" />
+                    </StackPanel>
+
+                    <!-- 第 2 步：配模型 -->
+                    <StackPanel x:Name="Pane2" Spacing="14" Visibility="Collapsed">
+                        <TextBlock FontSize="15" TextWrapping="Wrap"
+                                   Text="本地题库里没有的题，得有个「大脑」来答——配一个 AI 模型就够了。" />
+                        <TextBlock TextWrapping="Wrap" Style="{StaticResource Subtle}"
+                                   Text="填一个接口地址和 API Key 就能用：DeepSeek、硅基流动、阿里云百炼都有免费额度。不想花钱也可以接本机 Ollama，完全离线。已经有 OCS 题库配置的话，直接导入也能查。" />
+                        <Border Style="{StaticResource CardBorder}">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="怎么配" FontWeight="SemiBold" />
+                                <TextBlock TextWrapping="Wrap" Style="{StaticResource Subtle}"
+                                           Text="设置 → 模型与网络 → 添加服务商 → 选一个预设 → 填 API Key → 点「获取模型」把模型选上 → 右上角保存。" />
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                   Text="也可以先跳过：只要本地题库或局域网里有这道题，不配模型照样能查。" />
+                        <Button Content="去设置配模型" Style="{StaticResource AccentButtonStyle}"
+                                Click="OnGoSettingsModels" HorizontalAlignment="Left" />
+                    </StackPanel>
+
+                    <!-- 第 3 步：图片识题 -->
+                    <StackPanel x:Name="Pane3" Spacing="14" Visibility="Collapsed">
+                        <TextBlock FontSize="15" TextWrapping="Wrap"
+                                   Text="题目在屏幕上、在纸上？不用手敲——截个图就能查。" />
+                        <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                   Text="搜题页左上角有「截图识题」和「选图片」两个按钮，识别出来的题干和选项会自动填进输入框。识别在本地完成，图片不会上传。" />
+                        <Border Style="{StaticResource CardBorder}">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="识别引擎" FontWeight="SemiBold" />
+                                <TextBlock x:Name="OcrStatusText" TextWrapping="Wrap"
+                                           Style="{StaticResource Subtle}" IsTextSelectionEnabled="True" />
+                            </StackPanel>
+                        </Border>
+                        <Button Content="去设置看看识别引擎" Click="OnGoSettingsOcr" HorizontalAlignment="Left" />
+                    </StackPanel>
+
+                    <!-- 第 4 步：开搜 -->
+                    <StackPanel x:Name="Pane4" Spacing="14" Visibility="Collapsed">
+                        <TextBlock FontSize="15" TextWrapping="Wrap" Text="就这么用，三步：" />
+
+                        <Border Style="{StaticResource CardBorder}">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="1 · 把题放进去" FontWeight="SemiBold" />
+                                <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                           Text="粘到左边的「题干」框；选项一行一个也粘上，程序会自己分出 A/B/C/D。" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource CardBorder}">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="2 · 选来源" FontWeight="SemiBold" />
+                                <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                           Text="本地题库 / 局域网 / 在线题库 / AI，勾上你要用的，默认全开也行。" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource CardBorder}">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="3 · 点「开始搜题」" FontWeight="SemiBold" />
+                                <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                           Text="也可以直接按 Ctrl+Enter。答案会按可信度排在上面。" />
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                   Text="小技巧：搜到答案后点一下「存入本地题库」，下次同一题就是秒出，也不花 token。" />
+                        <Button Content="开始搜题" Style="{StaticResource AccentButtonStyle}"
+                                Click="OnFinishSearch" HorizontalAlignment="Left" />
+                    </StackPanel>
+
+                    <!-- 底部按钮 -->
+                    <Grid ColumnSpacing="8" Margin="0,6,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="SkipButton" Grid.Column="0" Content="跳过引导" Click="OnSkip" HorizontalAlignment="Left" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                            <Button x:Name="BackButton" Content="上一步" Click="OnBack" IsEnabled="False" />
+                            <Button x:Name="NextButton" Content="下一步" Style="{StaticResource AccentButtonStyle}"
+                                    Click="OnNext" />
+                        </StackPanel>
+                    </Grid>
+
+                </StackPanel>
+            </Border>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

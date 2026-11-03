@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Page
     x:Class="QBank.App.Pages.SettingsPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -18,380 +18,440 @@
             </Grid.ColumnDefinitions>
             <StackPanel Spacing="2">
                 <TextBlock Text="设置" Style="{StaticResource PageTitle}" />
-                <TextBlock x:Name="HeaderHint" Style="{StaticResource Subtle}" Text="改完记得点右上角保存" />
+                <TextBlock x:Name="HeaderHint" Style="{StaticResource Subtle}"
+                           Text="左边五类按 1→5 过一遍就配完了；改完记得点右上角「保存设置」" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button Content="重看上手引导" Click="OnReplayOnboarding" />
                 <Button Content="重新加载" Click="OnReload" />
                 <Button Content="保存设置" Style="{StaticResource AccentButtonStyle}" Click="OnSave" />
             </StackPanel>
         </Grid>
 
-        <ScrollViewer x:Name="ContentScroll" Grid.Row="1" Padding="20,0,20,24" VerticalScrollBarVisibility="Auto" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Spacing="16" HorizontalAlignment="Stretch">
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="290" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
 
-                <!-- AI 模型管理 -->
-                <Border Style="{StaticResource CardBorder}">
-                    <StackPanel Spacing="12">
-                        <Grid>
+            <!-- 左侧分类 -->
+            <Border Grid.Column="0" BorderThickness="0,1,1,0"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled">
+                    <ListView x:Name="GroupNav" SelectionMode="Single" Padding="10,10,10,16"
+                              SelectionChanged="OnGroupSelectionChanged">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Grid ColumnSpacing="12" Padding="0,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon Grid.Column="0" Glyph="{Binding Glyph}" FontSize="16"
+                                              VerticalAlignment="Top" Margin="0,3,0,0" />
+                                    <StackPanel Grid.Column="1" Spacing="2">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding Subtitle}" Style="{StaticResource Subtle}"
+                                                   FontSize="12" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </ScrollViewer>
+            </Border>
+
+            <!-- 右侧内容 -->
+            <ScrollViewer x:Name="ContentScroll" Grid.Column="1" Padding="20,10,20,24"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Spacing="16" HorizontalAlignment="Stretch">
+
+                <!-- 1 | 模型与网络：配好一个模型就能查题 -->
+                <StackPanel x:Name="GroupModels" Spacing="16" Visibility="Visible">
+                    <!-- AI 模型管理 -->
+                    <Border Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="12">
+                            <Grid>
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="AI 模型管理" Style="{StaticResource SectionTitle}" Margin="0" />
+                                    <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                               Text="在这里管理答题用的模型服务。填好接口地址和 Key 后点「获取模型」，会直接从接口拉取该账号可用的模型列表。" />
+                                </StackPanel>
+                                <Button HorizontalAlignment="Right" VerticalAlignment="Top" Content="添加服务商" Click="OnAddProvider">
+                                    <Button.Flyout>
+                                        <MenuFlyout x:Name="PresetFlyout" />
+                                    </Button.Flyout>
+                                </Button>
+                            </Grid>
+                            <StackPanel x:Name="ProviderList" Spacing="10" />
+                            <TextBlock x:Name="ProviderEmptyHint" Style="{StaticResource Subtle}"
+                                       Text="还没有 AI 服务商，点「添加服务商」从预设里挑一个。" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 网络出口 -->
+                    <Border x:Name="NetworkCard" Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="网络出口 · 代理设置" Style="{StaticResource SectionTitle}" Margin="0" />
+                            <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                       Text="关掉代理软件后，Windows 有时会残留一个指向死端口的系统代理，导致所有联网请求（AI 模型、自定义接口、在线题库、模型列表）全部报「由于目标计算机积极拒绝」。这里可以强制走直连。" />
+
+                            <Grid ColumnSpacing="16" RowSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="260" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <ComboBox x:Name="ProxyModeBox" Grid.Row="0" Grid.Column="0" Header="代理模式"
+                                          SelectionChanged="OnProxyModeChanged">
+                                    <ComboBoxItem Content="跟随系统代理" Tag="auto" />
+                                    <ComboBoxItem Content="直连（忽略系统代理）" Tag="direct" />
+                                    <ComboBoxItem Content="自定义代理" Tag="custom" />
+                                </ComboBox>
+                                <TextBox x:Name="ProxyUrlBox" Grid.Row="0" Grid.Column="1"
+                                         Header="代理地址（自定义模式用，如 http://127.0.0.1:7890）"
+                                         PlaceholderText="http://127.0.0.1:7890" />
+
+                                <TextBox x:Name="ProxyBypassBox" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                         Header="不走代理的地址（分号分隔）" />
+                            </Grid>
+
+                            <CheckBox x:Name="ProxyFallbackBox"
+                                      Content="跟随系统代理时，如果代理指向的本机端口没在监听，自动改走直连" />
+
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="刷新当前出口" Click="OnRefreshNetwork" />
+                                <Button Content="用第一个可用模型试一下" Click="OnTestNetwork" />
+                            </StackPanel>
+
+                            <TextBlock x:Name="NetworkStatusText" Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                       IsTextSelectionEnabled="True" />
+                        </StackPanel>
+                    </Border>
+
+                </StackPanel>
+
+                <!-- 2 | 题库来源：别人的题库搬进来，自己的题库给出去 -->
+                <StackPanel x:Name="GroupSources" Spacing="16" Visibility="Collapsed">
+                    <!-- 在线题库 -->
+                    <Border x:Name="OcsListCard" Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="12">
                             <StackPanel Spacing="2">
-                                <TextBlock Text="AI 模型管理" Style="{StaticResource SectionTitle}" Margin="0" />
+                                <TextBlock Text="在线题库（OCS 兼容）" Style="{StaticResource SectionTitle}" Margin="0" />
                                 <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
-                                           Text="在这里管理答题用的模型服务。填好接口地址和 Key 后点「获取模型」，会直接从接口拉取该账号可用的模型列表。" />
+                                           Text="支持 OCS 的 AnswererWrapper 配置：粘贴 JSON 字符串、题库配置链接或 Base64 都能导入，导出的 JSON 也能直接粘回 OCS 使用。" />
                             </StackPanel>
-                            <Button HorizontalAlignment="Right" VerticalAlignment="Top" Content="添加服务商" Click="OnAddProvider">
-                                <Button.Flyout>
-                                    <MenuFlyout x:Name="PresetFlyout" />
-                                </Button.Flyout>
-                            </Button>
-                        </Grid>
-                        <StackPanel x:Name="ProviderList" Spacing="10" />
-                        <TextBlock x:Name="ProviderEmptyHint" Style="{StaticResource Subtle}"
-                                   Text="还没有 AI 服务商，点「添加服务商」从预设里挑一个。" />
-                    </StackPanel>
-                </Border>
 
-                <!-- 在线题库 -->
-                <Border x:Name="OcsListCard" Style="{StaticResource CardBorder}">
-                    <StackPanel Spacing="12">
-                        <StackPanel Spacing="2">
-                            <TextBlock Text="在线题库（OCS 兼容）" Style="{StaticResource SectionTitle}" Margin="0" />
-                            <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
-                                       Text="支持 OCS 的 AnswererWrapper 配置：粘贴 JSON 字符串、题库配置链接或 Base64 都能导入，导出的 JSON 也能直接粘回 OCS 使用。" />
-                        </StackPanel>
-
-                        <TextBox x:Name="OcsImportBox" AcceptsReturn="True" TextWrapping="Wrap" Height="90"
-                                 PlaceholderText="粘贴题库配置 JSON / 链接 / Base64…" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="导入题库" Click="OnImportOcs" />
-                            <Button Content="从剪贴板粘贴" Click="OnPasteOcsClipboard" />
-                            <Button Content="导出全部题库" Click="OnExportOcs" />
-                        </StackPanel>
-
-                        <StackPanel x:Name="OcsList" Spacing="8" />
-                        <TextBlock x:Name="OcsEmptyHint" Style="{StaticResource Subtle}" Text="还没有在线题库。" />
-                    </StackPanel>
-                </Border>
-
-                <!-- 图片识别 -->
-                <Border x:Name="OcrCard" Style="{StaticResource CardBorder}">
-                    <StackPanel Spacing="12">
-                        <StackPanel Spacing="2">
-                            <TextBlock Text="图片识题（OCR）" Style="{StaticResource SectionTitle}" Margin="0" />
-                            <TextBlock x:Name="OcrDescribe" Style="{StaticResource Subtle}" TextWrapping="Wrap" />
-                        </StackPanel>
-
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <ComboBox x:Name="OcrEngineCombo" Header="识别引擎" Width="260" SelectionChanged="OnOcrEngineChanged">
-                                <ComboBoxItem Content="Umi-OCR / PaddleOCR（离线，推荐）" Tag="umi" />
-                                <ComboBoxItem Content="Windows 系统 OCR" Tag="windows" />
-                                <ComboBoxItem Content="Ollama 视觉模型" Tag="ollama" />
-                                <ComboBoxItem Content="自定义 HTTP 接口" Tag="custom" />
-                                <ComboBoxItem Content="关闭" Tag="none" />
-                            </ComboBox>
-                            <Button VerticalAlignment="Bottom" Content="自检" Click="OnOcrSelfTest" />
-                        </StackPanel>
-
-                        <StackPanel x:Name="UmiPanel" Spacing="8">
-                            <TextBlock Text="Umi-OCR 设置" Style="{StaticResource FieldLabel}" />
-                            <CheckBox x:Name="UmiUseHttp" Content="优先使用 Umi-OCR 的 HTTP 服务（未开启时自动直连引擎）" />
-                            <TextBox x:Name="UmiApiUrl" Header="HTTP 地址" PlaceholderText="http://127.0.0.1:1224" />
-                            <TextBox x:Name="UmiInstallDir" Header="安装目录（留空自动探测）" PlaceholderText="D:\Umi-OCR" />
-                            <TextBox x:Name="UmiExePath" Header="PaddleOCR-json.exe 路径（留空自动探测）" />
+                            <TextBox x:Name="OcsImportBox" AcceptsReturn="True" TextWrapping="Wrap" Height="90"
+                                     PlaceholderText="粘贴题库配置 JSON / 链接 / Base64…" />
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <TextBox x:Name="UmiConfigPath" Header="语言模型" Width="320"
-                                         PlaceholderText="models/config_chinese.txt" />
-                                <Button VerticalAlignment="Bottom" Content="探测安装位置" Click="OnDetectUmi" />
+                                <Button Content="导入题库" Click="OnImportOcs" />
+                                <Button Content="从剪贴板粘贴" Click="OnPasteOcsClipboard" />
+                                <Button Content="导出全部题库" Click="OnExportOcs" />
                             </StackPanel>
-                        </StackPanel>
 
-                        <StackPanel x:Name="WindowsOcrPanel" Spacing="8" Visibility="Collapsed">
-                            <TextBlock Text="Windows 系统 OCR" Style="{StaticResource FieldLabel}" />
-                            <ComboBox x:Name="WindowsLangCombo" Header="识别语言" Width="320" />
+                            <StackPanel x:Name="OcsList" Spacing="8" />
+                            <TextBlock x:Name="OcsEmptyHint" Style="{StaticResource Subtle}" Text="还没有在线题库。" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- OCS 对接（给油猴脚本提供题库） -->
+                    <Border x:Name="OcsBridgeCard" Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="OCS 对接 · 让 OCS 脚本自动答题" Style="{StaticResource SectionTitle}" Margin="0" />
                             <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
-                                       Text="系统 OCR 完全离线、零下载，但只识别印刷体，复杂排版效果一般。" />
-                        </StackPanel>
+                                       Text="开一个本机题库接口，把本地题库、局域网节点、AI 模型聚合起来。在 OCS 里粘上生成的配置，收题时就会自动来问本程序。" />
 
-                        <StackPanel x:Name="OllamaOcrPanel" Spacing="8" Visibility="Collapsed">
-                            <TextBlock Text="Ollama 视觉模型" Style="{StaticResource FieldLabel}" />
-                            <TextBox x:Name="OllamaBaseUrl" Header="接口地址" PlaceholderText="http://127.0.0.1:11434/v1" />
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <AutoSuggestBox x:Name="OllamaModelBox" Header="模型" Width="320" PlaceholderText="qwen2.5vl:7b" />
-                                <Button VerticalAlignment="Bottom" Content="拉取本机模型" Click="OnFetchOllamaModels" />
+                                <Button Content="复制 OCS 配置" Style="{StaticResource AccentButtonStyle}" Click="OnCopyOcsConfig" />
+                                <Button Content="一键导入 OCS" Click="OnImportOcsViaUrl" />
+                                <Button Content="预览配置" Click="OnPreviewOcsConfig" />
+                                <Button Content="测试接口" Click="OnTestOcsBridge" />
                             </StackPanel>
-                        </StackPanel>
 
-                        <StackPanel x:Name="CustomOcrPanel" Spacing="8" Visibility="Collapsed">
-                            <TextBlock Text="自定义 HTTP 识别接口" Style="{StaticResource FieldLabel}" />
-                            <TextBox x:Name="CustomOcrUrl" Header="接口地址" PlaceholderText="https://example.com/ocr" />
-                            <TextBox x:Name="CustomOcrBody" Header="请求体模板（支持 {{image_base64}} 与 {{mime}}）"
-                                     AcceptsReturn="True" TextWrapping="Wrap" Height="80" />
-                            <TextBox x:Name="CustomOcrPath" Header="结果路径（点分，例如 data.text）" PlaceholderText="text" />
-                        </StackPanel>
+                            <TextBlock x:Name="OcsBridgeStatusText" Style="{StaticResource Subtle}" TextWrapping="Wrap" />
 
-                        <CheckBox x:Name="OcrSplitBox" Content="识别后自动切分题干与选项" />
-                    </StackPanel>
-                </Border>
+                            <Grid ColumnSpacing="16" RowSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
 
-                <!-- 搜题选项 -->
-                <Border x:Name="SearchOptionsCard" Style="{StaticResource CardBorder}">
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="搜题选项" Style="{StaticResource SectionTitle}" Margin="0" />
+                                <NumberBox x:Name="OcsPortBox" Grid.Row="0" Grid.Column="0" Header="对接口端口"
+                                           Minimum="1024" Maximum="65535" SpinButtonPlacementMode="Compact" />
+                                <TextBox x:Name="OcsNameBox" Grid.Row="0" Grid.Column="1" Header="在 OCS 里显示的名字" />
+                                <PasswordBox x:Name="OcsTokenBox" Grid.Row="0" Grid.Column="2" Header="访问口令（可选）"
+                                             PasswordChar="*" />
 
-                        <Grid ColumnSpacing="16" RowSpacing="12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
+                                <NumberBox x:Name="OcsMaxResultsBox" Grid.Row="1" Grid.Column="0" Header="最多返回几条"
+                                           Minimum="1" Maximum="20" SpinButtonPlacementMode="Compact" />
+                                <NumberBox x:Name="OcsMinScoreBox" Grid.Row="1" Grid.Column="1" Header="最低相似度（0~1）"
+                                           Minimum="0" Maximum="1" SmallChange="0.05" SpinButtonPlacementMode="Compact" />
+                                <NumberBox x:Name="OcsTimeoutBox" Grid.Row="1" Grid.Column="2" Header="等待上限（秒）"
+                                           Minimum="5" Maximum="180" SpinButtonPlacementMode="Compact" />
+                            </Grid>
 
-                            <NumberBox x:Name="TimeoutBox" Grid.Row="0" Grid.Column="0" Header="单次搜索超时（秒）"
-                                       Minimum="5" Maximum="300" SpinButtonPlacementMode="Compact" />
-                            <NumberBox x:Name="ParallelBox" Grid.Row="0" Grid.Column="1" Header="并发来源上限"
-                                       Minimum="1" Maximum="32" SpinButtonPlacementMode="Compact" />
-                            <NumberBox x:Name="CacheScoreBox" Grid.Row="1" Grid.Column="0" Header="缓存命中阈值（0~1）"
-                                       Minimum="0.3" Maximum="1" SmallChange="0.01" SpinButtonPlacementMode="Compact" />
-                            <NumberBox x:Name="AutoCacheBox" Grid.Row="1" Grid.Column="1" Header="自动入库阈值（0~1）"
-                                       Minimum="0.3" Maximum="1" SmallChange="0.01" SpinButtonPlacementMode="Compact" />
-                        </Grid>
-
-                        <StackPanel Spacing="6">
-                            <CheckBox x:Name="AutoCacheSwitch" Content="把高置信度的 AI / 局域网结果自动写进本地题库" />
-                            <CheckBox x:Name="RecordHistorySwitch" Content="记录每次搜题到历史" />
-                        </StackPanel>
-                    </StackPanel>
-                </Border>
-
-                <!-- OCS 对接（给油猴脚本提供题库） -->
-                <Border x:Name="OcsBridgeCard" Style="{StaticResource CardBorder}">
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="OCS 对接 · 让 OCS 脚本自动答题" Style="{StaticResource SectionTitle}" Margin="0" />
-                        <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
-                                   Text="开一个本机题库接口，把本地题库、局域网节点、AI 模型聚合起来。在 OCS 里粘上生成的配置，收题时就会自动来问本程序。" />
-
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="复制 OCS 配置" Style="{StaticResource AccentButtonStyle}" Click="OnCopyOcsConfig" />
-                            <Button Content="一键导入 OCS" Click="OnImportOcsViaUrl" />
-                            <Button Content="预览配置" Click="OnPreviewOcsConfig" />
-                            <Button Content="测试接口" Click="OnTestOcsBridge" />
-                        </StackPanel>
-
-                        <TextBlock x:Name="OcsBridgeStatusText" Style="{StaticResource Subtle}" TextWrapping="Wrap" />
-
-                        <Grid ColumnSpacing="16" RowSpacing="12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-
-                            <NumberBox x:Name="OcsPortBox" Grid.Row="0" Grid.Column="0" Header="对接口端口"
-                                       Minimum="1024" Maximum="65535" SpinButtonPlacementMode="Compact" />
-                            <TextBox x:Name="OcsNameBox" Grid.Row="0" Grid.Column="1" Header="在 OCS 里显示的名字" />
-                            <PasswordBox x:Name="OcsTokenBox" Grid.Row="0" Grid.Column="2" Header="访问口令（可选）"
-                                         PasswordChar="*" />
-
-                            <NumberBox x:Name="OcsMaxResultsBox" Grid.Row="1" Grid.Column="0" Header="最多返回几条"
-                                       Minimum="1" Maximum="20" SpinButtonPlacementMode="Compact" />
-                            <NumberBox x:Name="OcsMinScoreBox" Grid.Row="1" Grid.Column="1" Header="最低相似度（0~1）"
-                                       Minimum="0" Maximum="1" SmallChange="0.05" SpinButtonPlacementMode="Compact" />
-                            <NumberBox x:Name="OcsTimeoutBox" Grid.Row="1" Grid.Column="2" Header="等待上限（秒）"
-                                       Minimum="5" Maximum="180" SpinButtonPlacementMode="Compact" />
-                        </Grid>
-
-                        <Grid ColumnSpacing="12" RowSpacing="2">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-
-                            <CheckBox x:Name="OcsUseLocalBox" Grid.Row="0" Grid.Column="0" Content="包含本地题库 / 缓存" />
-                            <CheckBox x:Name="OcsUseLanBox" Grid.Row="1" Grid.Column="0" Content="包含局域网节点" />
-                            <CheckBox x:Name="OcsUseAiBox" Grid.Row="2" Grid.Column="0" Content="包含 AI 模型" />
-                            <CheckBox x:Name="OcsUseOcsBox" Grid.Row="0" Grid.Column="1" Content="包含在线题库（易绕圈，不推荐）" />
-                            <CheckBox x:Name="OcsRecordHistoryBox" Grid.Row="1" Grid.Column="1" Content="把 OCS 传来的题目记入历史" />
-                            <CheckBox x:Name="OcsEnableLanBox" Grid.Row="2" Grid.Column="1" Content="允许局域网其它电脑调用" />
-                        </Grid>
-
-                        <TextBlock x:Name="OcsUrlText" Style="{StaticResource Subtle}" TextWrapping="Wrap"
-                                   IsTextSelectionEnabled="True" />
-                    </StackPanel>
-                </Border>
-
-                <!-- 网络出口 -->
-                <Border x:Name="NetworkCard" Style="{StaticResource CardBorder}">
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="网络出口 · 代理设置" Style="{StaticResource SectionTitle}" Margin="0" />
-                        <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
-                                   Text="关掉代理软件后，Windows 有时会残留一个指向死端口的系统代理，导致所有联网请求（AI 模型、自定义接口、在线题库、模型列表）全部报「由于目标计算机积极拒绝」。这里可以强制走直连。" />
-
-                        <Grid ColumnSpacing="16" RowSpacing="12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="260" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-
-                            <ComboBox x:Name="ProxyModeBox" Grid.Row="0" Grid.Column="0" Header="代理模式"
-                                      SelectionChanged="OnProxyModeChanged">
-                                <ComboBoxItem Content="跟随系统代理" Tag="auto" />
-                                <ComboBoxItem Content="直连（忽略系统代理）" Tag="direct" />
-                                <ComboBoxItem Content="自定义代理" Tag="custom" />
-                            </ComboBox>
-                            <TextBox x:Name="ProxyUrlBox" Grid.Row="0" Grid.Column="1"
-                                     Header="代理地址（自定义模式用，如 http://127.0.0.1:7890）"
-                                     PlaceholderText="http://127.0.0.1:7890" />
-
-                            <TextBox x:Name="ProxyBypassBox" Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
-                                     Header="不走代理的地址（分号分隔）" />
-                        </Grid>
-
-                        <CheckBox x:Name="ProxyFallbackBox"
-                                  Content="跟随系统代理时，如果代理指向的本机端口没在监听，自动改走直连" />
-
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="刷新当前出口" Click="OnRefreshNetwork" />
-                            <Button Content="用第一个可用模型试一下" Click="OnTestNetwork" />
-                        </StackPanel>
-
-                        <TextBlock x:Name="NetworkStatusText" Style="{StaticResource Subtle}" TextWrapping="Wrap"
-                                   IsTextSelectionEnabled="True" />
-                    </StackPanel>
-                </Border>
-
-                <!-- 窗口与托盘 -->
-                <Border x:Name="WindowCard" Style="{StaticResource CardBorder}">
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="窗口与托盘" Style="{StaticResource SectionTitle}" Margin="0" />
-                        <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
-                                   Text="题库工坊在后台跑着局域网共享和 OCS 接口服务，所以关掉窗口不等于退出程序。默认收进系统托盘继续跑，双击托盘图标叫回来。" />
-
-                        <CheckBox x:Name="TrayEnableBox" Content="启用系统托盘图标" Checked="OnWindowTrayOptionChanged" Unchecked="OnWindowTrayOptionChanged" />
-                        <CheckBox x:Name="TrayCloseBox" Content="关窗口时收进托盘（不退出程序）" />
-                        <CheckBox x:Name="TrayMinimizeBox" Content="最小化时也收进托盘" />
-                        <CheckBox x:Name="TrayHintBox" Content="第一次收进托盘时弹个气泡说明" />
-                        <CheckBox x:Name="RememberPlacementBox" Content="记住窗口大小和位置" />
-
-                        <TextBlock x:Name="TrayStatusText" Style="{StaticResource Subtle}" TextWrapping="Wrap" />
-                    </StackPanel>
-                </Border>
-
-                <!-- 备份与恢复 -->
-                <Border x:Name="BackupCard" Style="{StaticResource CardBorder}">
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="备份与恢复" Style="{StaticResource SectionTitle}" Margin="0" />
-                        <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
-                                   Text="把 AI 接口、API Key、OCS 题库、OCR 和网络设置一起打包成一个小文件。换机器、重装系统、调坏了想退回上一版，都不用再一行行重填。题库和搜索历史在数据库里，用下面的「立即备份数据库」单独备份。" />
-
-                        <Grid ColumnSpacing="10" RowSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-
-                            <TextBlock Grid.Row="0" Grid.Column="0" Text="备份内容" Style="{StaticResource FieldLabel}" Width="76" />
-                            <ComboBox x:Name="BackupScopeBox" Grid.Row="0" Grid.Column="1" HorizontalAlignment="Left" Width="240"
-                                      SelectionChanged="OnBackupScopeChanged">
-                                <ComboBoxItem Content="全部设置（推荐）" Tag="all" />
-                                <ComboBoxItem Content="只备份 AI 接口和 Key" Tag="ai" />
-                            </ComboBox>
-
-                            <TextBlock Grid.Row="1" Grid.Column="0" Text="加密口令" Style="{StaticResource FieldLabel}" />
-                            <Grid Grid.Row="1" Grid.Column="1" ColumnSpacing="10">
+                            <Grid ColumnSpacing="12" RowSpacing="2">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <PasswordBox x:Name="BackupPasswordBox" Grid.Column="0"
-                                             PlaceholderText="可选：填了就用它加密（Key 不会以明文落盘）" />
-                                <PasswordBox x:Name="BackupPasswordAgainBox" Grid.Column="1"
-                                             PlaceholderText="再输一遍确认" />
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <CheckBox x:Name="OcsUseLocalBox" Grid.Row="0" Grid.Column="0" Content="包含本地题库 / 缓存" />
+                                <CheckBox x:Name="OcsUseLanBox" Grid.Row="1" Grid.Column="0" Content="包含局域网节点" />
+                                <CheckBox x:Name="OcsUseAiBox" Grid.Row="2" Grid.Column="0" Content="包含 AI 模型" />
+                                <CheckBox x:Name="OcsUseOcsBox" Grid.Row="0" Grid.Column="1" Content="包含在线题库（易绕圈，不推荐）" />
+                                <CheckBox x:Name="OcsRecordHistoryBox" Grid.Row="1" Grid.Column="1" Content="把 OCS 传来的题目记入历史" />
+                                <CheckBox x:Name="OcsEnableLanBox" Grid.Row="2" Grid.Column="1" Content="允许局域网其它电脑调用" />
                             </Grid>
 
-                            <TextBlock Grid.Row="2" Grid.Column="0" Text="备注" Style="{StaticResource FieldLabel}" />
-                            <TextBox x:Name="BackupNoteBox" Grid.Row="2" Grid.Column="1"
-                                     PlaceholderText="可选，比如「换电脑前的备份」，恢复时会显示" />
-                        </Grid>
-
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="快速备份" Click="OnQuickBackup" Style="{StaticResource AccentButtonStyle}" />
-                            <Button Content="导出到文件…" Click="OnExportBackupFile" />
-                            <Button Content="复制到剪贴板" Click="OnCopyBackup" />
+                            <TextBlock x:Name="OcsUrlText" Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                       IsTextSelectionEnabled="True" />
                         </StackPanel>
+                    </Border>
 
-                        <TextBlock x:Name="BackupStatusText" Style="{StaticResource Subtle}" TextWrapping="Wrap"
-                                   IsTextSelectionEnabled="True" />
+                </StackPanel>
 
-                        <TextBlock Text="已有的快速备份" Style="{StaticResource FieldLabel}" Margin="0,6,0,0" />
-                        <ListView x:Name="BackupList" SelectionMode="None" MaxHeight="240" Visibility="Collapsed"
-                                  HorizontalContentAlignment="Stretch">
-                            <ListView.ItemTemplate>
-                                <DataTemplate>
-                                    <Grid ColumnSpacing="10" Padding="0,4">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0" Spacing="2">
-                                            <TextBlock Text="{Binding Describe}" TextWrapping="Wrap" />
-                                            <TextBlock Text="{Binding Note}" Style="{StaticResource Subtle}"
-                                                       TextWrapping="Wrap" />
-                                        </StackPanel>
-                                        <Button Grid.Column="1" Content="恢复" Click="OnRestoreQuickBackup"
-                                                Tag="{Binding FilePath}" />
-                                        <Button Grid.Column="2" Content="删除" Click="OnDeleteQuickBackup"
-                                                Tag="{Binding FilePath}" />
-                                    </Grid>
-                                </DataTemplate>
-                            </ListView.ItemTemplate>
-                        </ListView>
-                        <TextBlock x:Name="BackupEmptyHint" Style="{StaticResource Subtle}" TextWrapping="Wrap"
-                                   Text="还没有快速备份。点上方的「快速备份」，文件会存在数据目录的 backups 文件夹里。" />
+                <!-- 3 | 图片识题：拍张照就能查 -->
+                <StackPanel x:Name="GroupOcr" Spacing="16" Visibility="Collapsed">
+                    <!-- 图片识别 -->
+                    <Border x:Name="OcrCard" Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="12">
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="图片识题（OCR）" Style="{StaticResource SectionTitle}" Margin="0" />
+                                <TextBlock x:Name="OcrDescribe" Style="{StaticResource Subtle}" TextWrapping="Wrap" />
+                            </StackPanel>
 
-                        <TextBlock Text="从别处恢复" Style="{StaticResource FieldLabel}" Margin="0,6,0,0" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="从文件恢复…" Click="OnImportBackupFile" />
-                            <Button Content="从剪贴板恢复" Click="OnPasteBackupClipboard" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <ComboBox x:Name="OcrEngineCombo" Header="识别引擎" Width="260" SelectionChanged="OnOcrEngineChanged">
+                                    <ComboBoxItem Content="Umi-OCR / PaddleOCR（离线，推荐）" Tag="umi" />
+                                    <ComboBoxItem Content="Windows 系统 OCR" Tag="windows" />
+                                    <ComboBoxItem Content="Ollama 视觉模型" Tag="ollama" />
+                                    <ComboBoxItem Content="自定义 HTTP 接口" Tag="custom" />
+                                    <ComboBoxItem Content="关闭" Tag="none" />
+                                </ComboBox>
+                                <Button VerticalAlignment="Bottom" Content="自检" Click="OnOcrSelfTest" />
+                            </StackPanel>
+
+                            <StackPanel x:Name="UmiPanel" Spacing="8">
+                                <TextBlock Text="Umi-OCR 设置" Style="{StaticResource FieldLabel}" />
+                                <CheckBox x:Name="UmiUseHttp" Content="优先使用 Umi-OCR 的 HTTP 服务（未开启时自动直连引擎）" />
+                                <TextBox x:Name="UmiApiUrl" Header="HTTP 地址" PlaceholderText="http://127.0.0.1:1224" />
+                                <TextBox x:Name="UmiInstallDir" Header="安装目录（留空自动探测）" PlaceholderText="D:\Umi-OCR" />
+                                <TextBox x:Name="UmiExePath" Header="PaddleOCR-json.exe 路径（留空自动探测）" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBox x:Name="UmiConfigPath" Header="语言模型" Width="320"
+                                             PlaceholderText="models/config_chinese.txt" />
+                                    <Button VerticalAlignment="Bottom" Content="探测安装位置" Click="OnDetectUmi" />
+                                </StackPanel>
+                            </StackPanel>
+
+                            <StackPanel x:Name="WindowsOcrPanel" Spacing="8" Visibility="Collapsed">
+                                <TextBlock Text="Windows 系统 OCR" Style="{StaticResource FieldLabel}" />
+                                <ComboBox x:Name="WindowsLangCombo" Header="识别语言" Width="320" />
+                                <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                           Text="系统 OCR 完全离线、零下载，但只识别印刷体，复杂排版效果一般。" />
+                            </StackPanel>
+
+                            <StackPanel x:Name="OllamaOcrPanel" Spacing="8" Visibility="Collapsed">
+                                <TextBlock Text="Ollama 视觉模型" Style="{StaticResource FieldLabel}" />
+                                <TextBox x:Name="OllamaBaseUrl" Header="接口地址" PlaceholderText="http://127.0.0.1:11434/v1" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <AutoSuggestBox x:Name="OllamaModelBox" Header="模型" Width="320" PlaceholderText="qwen2.5vl:7b" />
+                                    <Button VerticalAlignment="Bottom" Content="拉取本机模型" Click="OnFetchOllamaModels" />
+                                </StackPanel>
+                            </StackPanel>
+
+                            <StackPanel x:Name="CustomOcrPanel" Spacing="8" Visibility="Collapsed">
+                                <TextBlock Text="自定义 HTTP 识别接口" Style="{StaticResource FieldLabel}" />
+                                <TextBox x:Name="CustomOcrUrl" Header="接口地址" PlaceholderText="https://example.com/ocr" />
+                                <TextBox x:Name="CustomOcrBody" Header="请求体模板（支持 {{image_base64}} 与 {{mime}}）"
+                                         AcceptsReturn="True" TextWrapping="Wrap" Height="80" />
+                                <TextBox x:Name="CustomOcrPath" Header="结果路径（点分，例如 data.text）" PlaceholderText="text" />
+                            </StackPanel>
+
+                            <CheckBox x:Name="OcrSplitBox" Content="识别后自动切分题干与选项" />
                         </StackPanel>
-                        <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
-                                   Text="恢复时会让你选「覆盖」还是「合并」：覆盖 = 完全变成备份里的样子；合并 = AI 服务商和 OCS 题库按条目更新，没填 Key 的条目不会把现有 Key 抹掉。" />
-                    </StackPanel>
-                </Border>
+                    </Border>
 
-                <!-- 数据 -->
-                <Border x:Name="DataCard" Style="{StaticResource CardBorder}">
-                    <StackPanel Spacing="10">
-                        <TextBlock Text="数据与存储" Style="{StaticResource SectionTitle}" Margin="0" />
-                        <TextBlock x:Name="DataDirText" Style="{StaticResource Subtle}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="打开数据目录" Click="OnOpenDataDir" />
-                            <Button Content="立即备份数据库" Click="OnBackupDatabase" />
+                </StackPanel>
+
+                <!-- 4 | 使用偏好：搜题行为与窗口 -->
+                <StackPanel x:Name="GroupPrefs" Spacing="16" Visibility="Collapsed">
+                    <!-- 搜题选项 -->
+                    <Border x:Name="SearchOptionsCard" Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="搜题选项" Style="{StaticResource SectionTitle}" Margin="0" />
+
+                            <Grid ColumnSpacing="16" RowSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <NumberBox x:Name="TimeoutBox" Grid.Row="0" Grid.Column="0" Header="单次搜索超时（秒）"
+                                           Minimum="5" Maximum="300" SpinButtonPlacementMode="Compact" />
+                                <NumberBox x:Name="ParallelBox" Grid.Row="0" Grid.Column="1" Header="并发来源上限"
+                                           Minimum="1" Maximum="32" SpinButtonPlacementMode="Compact" />
+                                <NumberBox x:Name="CacheScoreBox" Grid.Row="1" Grid.Column="0" Header="缓存命中阈值（0~1）"
+                                           Minimum="0.3" Maximum="1" SmallChange="0.01" SpinButtonPlacementMode="Compact" />
+                                <NumberBox x:Name="AutoCacheBox" Grid.Row="1" Grid.Column="1" Header="自动入库阈值（0~1）"
+                                           Minimum="0.3" Maximum="1" SmallChange="0.01" SpinButtonPlacementMode="Compact" />
+                            </Grid>
+
+                            <StackPanel Spacing="6">
+                                <CheckBox x:Name="AutoCacheSwitch" Content="把高置信度的 AI / 局域网结果自动写进本地题库" />
+                                <CheckBox x:Name="RecordHistorySwitch" Content="记录每次搜题到历史" />
+                            </StackPanel>
                         </StackPanel>
-                        <TextBlock x:Name="StatsText" Style="{StaticResource Subtle}" TextWrapping="Wrap" />
-                    </StackPanel>
-                </Border>
+                    </Border>
 
-            </StackPanel>
-        </ScrollViewer>
+                    <!-- 窗口与托盘 -->
+                    <Border x:Name="WindowCard" Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="窗口与托盘" Style="{StaticResource SectionTitle}" Margin="0" />
+                            <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                       Text="题库工坊在后台跑着局域网共享和 OCS 接口服务，所以关掉窗口不等于退出程序。默认收进系统托盘继续跑，双击托盘图标叫回来。" />
+
+                            <CheckBox x:Name="TrayEnableBox" Content="启用系统托盘图标" Checked="OnWindowTrayOptionChanged" Unchecked="OnWindowTrayOptionChanged" />
+                            <CheckBox x:Name="TrayCloseBox" Content="关窗口时收进托盘（不退出程序）" />
+                            <CheckBox x:Name="TrayMinimizeBox" Content="最小化时也收进托盘" />
+                            <CheckBox x:Name="TrayHintBox" Content="第一次收进托盘时弹个气泡说明" />
+                            <CheckBox x:Name="RememberPlacementBox" Content="记住窗口大小和位置" />
+
+                            <TextBlock x:Name="TrayStatusText" Style="{StaticResource Subtle}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+
+                </StackPanel>
+
+                <!-- 5 | 数据与备份：换机器不用重填 -->
+                <StackPanel x:Name="GroupData" Spacing="16" Visibility="Collapsed">
+                    <!-- 备份与恢复 -->
+                    <Border x:Name="BackupCard" Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="12">
+                            <TextBlock Text="备份与恢复" Style="{StaticResource SectionTitle}" Margin="0" />
+                            <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                       Text="把 AI 接口、API Key、OCS 题库、OCR 和网络设置一起打包成一个小文件。换机器、重装系统、调坏了想退回上一版，都不用再一行行重填。题库和搜索历史在数据库里，用下面的「立即备份数据库」单独备份。" />
+
+                            <Grid ColumnSpacing="10" RowSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="备份内容" Style="{StaticResource FieldLabel}" Width="76" />
+                                <ComboBox x:Name="BackupScopeBox" Grid.Row="0" Grid.Column="1" HorizontalAlignment="Left" Width="240"
+                                          SelectionChanged="OnBackupScopeChanged">
+                                    <ComboBoxItem Content="全部设置（推荐）" Tag="all" />
+                                    <ComboBoxItem Content="只备份 AI 接口和 Key" Tag="ai" />
+                                </ComboBox>
+
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="加密口令" Style="{StaticResource FieldLabel}" />
+                                <Grid Grid.Row="1" Grid.Column="1" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <PasswordBox x:Name="BackupPasswordBox" Grid.Column="0"
+                                                 PlaceholderText="可选：填了就用它加密（Key 不会以明文落盘）" />
+                                    <PasswordBox x:Name="BackupPasswordAgainBox" Grid.Column="1"
+                                                 PlaceholderText="再输一遍确认" />
+                                </Grid>
+
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="备注" Style="{StaticResource FieldLabel}" />
+                                <TextBox x:Name="BackupNoteBox" Grid.Row="2" Grid.Column="1"
+                                         PlaceholderText="可选，比如「换电脑前的备份」，恢复时会显示" />
+                            </Grid>
+
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="快速备份" Click="OnQuickBackup" Style="{StaticResource AccentButtonStyle}" />
+                                <Button Content="导出到文件…" Click="OnExportBackupFile" />
+                                <Button Content="复制到剪贴板" Click="OnCopyBackup" />
+                            </StackPanel>
+
+                            <TextBlock x:Name="BackupStatusText" Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                       IsTextSelectionEnabled="True" />
+
+                            <TextBlock Text="已有的快速备份" Style="{StaticResource FieldLabel}" Margin="0,6,0,0" />
+                            <ListView x:Name="BackupList" SelectionMode="None" MaxHeight="240" Visibility="Collapsed"
+                                      HorizontalContentAlignment="Stretch">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid ColumnSpacing="10" Padding="0,4">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" Spacing="2">
+                                                <TextBlock Text="{Binding Describe}" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding Note}" Style="{StaticResource Subtle}"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <Button Grid.Column="1" Content="恢复" Click="OnRestoreQuickBackup"
+                                                    Tag="{Binding FilePath}" />
+                                            <Button Grid.Column="2" Content="删除" Click="OnDeleteQuickBackup"
+                                                    Tag="{Binding FilePath}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                            <TextBlock x:Name="BackupEmptyHint" Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                       Text="还没有快速备份。点上方的「快速备份」，文件会存在数据目录的 backups 文件夹里。" />
+
+                            <TextBlock Text="从别处恢复" Style="{StaticResource FieldLabel}" Margin="0,6,0,0" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="从文件恢复…" Click="OnImportBackupFile" />
+                                <Button Content="从剪贴板恢复" Click="OnPasteBackupClipboard" />
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                       Text="恢复时会让你选「覆盖」还是「合并」：覆盖 = 完全变成备份里的样子；合并 = AI 服务商和 OCS 题库按条目更新，没填 Key 的条目不会把现有 Key 抹掉。" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 数据 -->
+                    <Border x:Name="DataCard" Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="数据与存储" Style="{StaticResource SectionTitle}" Margin="0" />
+                            <TextBlock x:Name="DataDirText" Style="{StaticResource Subtle}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="打开数据目录" Click="OnOpenDataDir" />
+                                <Button Content="立即备份数据库" Click="OnBackupDatabase" />
+                            </StackPanel>
+                            <TextBlock x:Name="StatsText" Style="{StaticResource Subtle}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+
+                </StackPanel>
+
+</StackPanel>
+            </ScrollViewer>
+        </Grid>
     </Grid>
 </Page>

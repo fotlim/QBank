@@ -211,7 +211,7 @@ public sealed partial class SearchPage : Page
         EmptyHint.Visibility = response.Ranked.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (response.Ranked.Count == 0)
         {
-            EmptyHint.Text = failed.Count > 0
+            EmptyHintDetail.Text = failed.Count > 0
                 ? "没有找到结果，来源报错：" + string.Join("；", failed.Select(f => $"{f.SourceName}={f.Error}"))
                 : "没有找到结果。可以换个说法，或到设置里换一个来源。";
         }
@@ -231,7 +231,30 @@ public sealed partial class SearchPage : Page
         BestCard.Visibility = Visibility.Collapsed;
         ResultMeta.Text = string.Empty;
         EmptyHint.Visibility = Visibility.Visible;
-        EmptyHint.Text = "还没有结果。粘贴题干后点「开始搜题」。";
+        EmptyHintDetail.Text = "还没有结果。左边粘上题干，然后点「开始搜题」。";
+    }
+
+    /// <summary>从引导进来时把焦点放到题干框上。</summary>
+    public void FocusQuestionInput()
+    {
+        try
+        {
+            TitleBox.Focus(FocusState.Programmatic);
+        }
+        catch (Exception ex)
+        {
+            AppServices.Current.Log("聚焦题干框失败：" + ex.Message);
+        }
+    }
+
+    private void OnReplayOnboarding(object sender, RoutedEventArgs e)
+    {
+        (App.MainAppWindow as MainWindow)?.ReplayOnboarding();
+    }
+
+    private void OnGoSettings(object sender, RoutedEventArgs e)
+    {
+        (App.MainAppWindow as MainWindow)?.NavigateTo("settings");
     }
 
     private void OnCopyBest(object sender, RoutedEventArgs e)

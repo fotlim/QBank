@@ -39,6 +39,9 @@ public sealed class AppConfig
     /// <summary>窗口与托盘行为。</summary>
     public WindowConfig Window { get; set; } = new();
 
+    /// <summary>首次使用引导的状态。</summary>
+    public OnboardingConfig Onboarding { get; set; } = new();
+
     /// <summary>首次运行写入演示与预设。</summary>
     public static AppConfig CreateDefault()
     {
@@ -584,4 +587,14 @@ public sealed class WindowConfig
         var h = WindowHeight < 480 ? 840 : Math.Min(WindowHeight, 4000);
         return (w, h);
     }
+}
+
+/// <summary>首次使用引导的状态。走过一次就不再自动弹。</summary>
+public sealed class OnboardingConfig
+{
+    /// <summary>是否已经看过引导（点了完成或跳过）。</summary>
+    public bool Done { get; set; }
+
+    /// <summary>走完引导的时间。</summary>
+    public DateTime? DoneAt { get; set; }
 }

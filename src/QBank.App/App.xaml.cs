@@ -76,6 +76,20 @@ public partial class App : Application
         }
     }
 
+    /// <summary>把主窗口叫到前面来（重看引导、托盘恢复时用）。</summary>
+    public static void ShowMainWindow()
+    {
+        try
+        {
+            if (MainAppWindow is MainWindow win) win.BringToFront();
+            else MainAppWindow?.Activate();
+        }
+        catch (Exception ex)
+        {
+            CrashLog("ShowMainWindow 失败", ex);
+        }
+    }
+
     /// <summary>写一行启动轨迹。</summary>
     public static void Trace(string message)
     {

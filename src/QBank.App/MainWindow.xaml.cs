@@ -37,6 +37,105 @@ public sealed partial class MainWindow : Window
         {
             App.CrashLog("MainWindow: 初始导航失败", ex);
         }
+
+        Onboarding.Finished += OnOnboardingFinished;
+        Onboarding.GoToSettings += OnOnboardingGoToSettings;
+        Onboarding.StartSearching += OnOnboardingStartSearching;
+
+        ShowOnboardingIfFirstRun();
+    }
+
+    /// <summary>第一次打开才弹引导；环境变量 QBANK_FORCE_ONBOARDING=1 可以强制弹（截图核验用）。</summary>
+    private void ShowOnboardingIfFirstRun()
+    {
+        var force = Environment.GetEnvironmentVariable("QBANK_FORCE_ONBOARDING");
+        var forced = !string.IsNullOrWhiteSpace(force) && force != "0";
+
+        var done = false;
+        try
+        {
+            done = AppServices.Current.Config.Config.Onboarding?.Done == true;
+        }
+        catch (Exception ex)
+        {
+            App.CrashLog("MainWindow: 读取引导状态失败", ex);
+        }
+
+        if (done && !forced) return;
+
+        OnboardingLayer.Visibility = Visibility.Visible;
+        App.CrashLog($"MainWindow: 显示上手引导（首次={!done}，强制={forced}）", null);
+    }
+
+    /// <summary>把引导标成已看过并保存。</summary>
+    private void MarkOnboardingDone()
+    {
+        try
+        {
+            var cfg = AppServices.Current.Config.Config;
+            cfg.Onboarding ??= new QBank.Core.Models.OnboardingConfig();
+            cfg.Onboarding.Done = true;
+            cfg.Onboarding.DoneAt = DateTime.Now;
+            AppServices.Current.SaveConfig();
+        }
+        catch (Exception ex)
+        {
+            App.CrashLog("MainWindow: 记录引导状态失败", ex);
+        }
+    }
+
+    private void OnOnboardingFinished(object? sender, EventArgs e)
+    {
+        OnboardingLayer.Visibility = Visibility.Collapsed;
+        MarkOnboardingDone();
+        NavigateTo("search");
+    }
+
+    private void OnOnboardingGoToSettings(object? sender, string group)
+    {
+        OnboardingLayer.Visibility = Visibility.Collapsed;
+        MarkOnboardingDone();
+        NavigateTo("settings");
+        (ContentFrame.Content as SettingsPage)?.FocusGroup(group);
+    }
+
+    private void OnOnboardingStartSearching(object? sender, EventArgs e)
+    {
+        OnboardingLayer.Visibility = Visibility.Collapsed;
+        MarkOnboardingDone();
+        NavigateTo("search");
+        (ContentFrame.Content as SearchPage)?.FocusQuestionInput();
+    }
+
+    /// <summary>按 tag 切页（顺带同步左导航高亮）。</summary>
+    public void NavigateTo(string tag)
+    {
+        var page = tag switch
+        {
+            "settings" => typeof(SettingsPage),
+            "bank" => typeof(BankPage),
+            "history" => typeof(HistoryPage),
+            "lan" => typeof(LanPage),
+            _ => typeof(SearchPage),
+        };
+
+        _currentTag = TagOf(page);
+        ContentFrame.Navigate(page);
+        SyncNavSelection(_currentTag);
+    }
+
+    /// <summary>让设置页滚到指定分类并显示出来（引导跳转、重看引导后用）。</summary>
+    public void ShowSettingsGroup(string group)
+    {
+        NavigateTo("settings");
+        (ContentFrame.Content as SettingsPage)?.FocusGroup(group);
+    }
+
+    /// <summary>重新弹一次上手引导（设置页/搜题页里的入口）。</summary>
+    public void ReplayOnboarding()
+    {
+        OnboardingLayer.Visibility = Visibility.Visible;
+        App.ShowMainWindow();
     }
 
     private static string TagOf(Type page)
@@ -301,6 +400,20 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             App.Trace("恢复窗口失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>把窗口显示出来并激活（重看引导时用）。</summary>
+    public void BringToFront()
+    {
+        try
+        {
+            _appWindow?.Show();
+            Activate();
+        }
+        catch (Exception ex)
+        {
+            App.Trace("BringToFront 失败：" + ex.Message);
         }
     }
 

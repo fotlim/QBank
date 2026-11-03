@@ -1,4 +1,4 @@
-﻿; 题库工坊 QBank —— Inno Setup 安装脚本
+; 题库工坊 QBank —— Inno Setup 安装脚本
 ; 编译：ISCC.exe install\qbank.iss
 ; 产物：install\Output\QBank-Setup-<版本>.exe
 ;
@@ -9,7 +9,7 @@
 
 #define AppName "题库工坊"
 #define AppNameEn "QBank"
-#define AppVersion "1.0.4"
+#define AppVersion "1.0.5"
 #define AppPublisher "Escape-Lin"
 #define AppUrl "https://github.com/fotlim/QBank"
 #define AppExeName "QBank.exe"
@@ -82,15 +82,36 @@ Name: "{autostartup}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: startu
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; 只清我们自己生成的日志与临时文件，用户数据目录一律不动
+; 只清我们自己生成的日志；题库数据要不要删由下面的代码问过用户再决定
 Type: files; Name: "{app}\startup.log"
-Type: filesandordirs; Name: "{app}\data"
 
 [Code]
+// 便携模式要不要开：
+//  - 有向导时按用户勾选；
+//  - 静默安装（/VERYSILENT）时向导里没勾的项也会被当成"选中"，所以这里改成
+//    只有命令行 /TASKS 里明确写了 portablemode 才认，避免批量部署时把数据
+//    稀里糊涂写进安装目录。
+function PortableWanted(): Boolean;
+var
+  Tail: String;
+begin
+  if not WizardSilent() then
+  begin
+    Result := WizardIsTaskSelected('portablemode');
+    Exit;
+  end;
+
+  Tail := Uppercase(GetCmdTail());
+  if Pos('!PORTABLEMODE', Tail) > 0 then
+    Result := False
+  else
+    Result := Pos('PORTABLEMODE', Tail) > 0;
+end;
+
 // 便携模式：装完在程序目录写一个 portable.txt，程序启动时就认它
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if (CurStep = ssPostInstall) and WizardIsTaskSelected('portablemode') then
+  if (CurStep = ssPostInstall) and PortableWanted() then
     SaveStringToFile(ExpandConstant('{app}\portable.txt'),
       'QBank portable mode. Data is stored in the "data" folder next to QBank.exe.' + #13#10 +
       'Delete this file to use the default location.' + #13#10, False);
@@ -120,7 +141,18 @@ begin
                        '选「否」可以保留，以后重装还能接着用。',
                        mbConfirmation, MB_YESNO or MB_DEFBUTTON2);
       if Answer = IDYES then
+      begin
         DelTree(DataDir, True, True, True);
+        // 数据都删了，便携标记也不用留着（留着会让安装目录删不干净）
+        if FileExists(ExpandConstant('{app}\portable.txt')) then
+          DeleteFile(ExpandConstant('{app}\portable.txt'));
+      end;
+    end
+    else
+    begin
+      // 压根没有数据目录，那便携标记也不必留，否则安装目录删不掉
+      if FileExists(ExpandConstant('{app}\portable.txt')) then
+        DeleteFile(ExpandConstant('{app}\portable.txt'));
     end;
   end;
 end;

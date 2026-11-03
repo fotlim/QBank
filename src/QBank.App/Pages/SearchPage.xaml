@@ -154,8 +154,66 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
-                    <TextBlock x:Name="EmptyHint" Text="还没有结果。粘贴题干后点「开始搜题」。"
-                               Style="{StaticResource Subtle}" Margin="0,24,0,0" TextWrapping="Wrap" />
+                    <!-- 空状态：新手照着做就行 -->
+                    <Border x:Name="EmptyHint" Style="{StaticResource CardBorder}" Margin="0,16,0,0">
+                        <StackPanel Spacing="14">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="第一次用？按这三步来" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock x:Name="EmptyHintDetail" Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                           Text="还没有结果。左边粘上题干，然后点「开始搜题」。" />
+                            </StackPanel>
+
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Width="22" Height="22" CornerRadius="11" VerticalAlignment="Top"
+                                        Background="{ThemeResource AccentFillColorDefaultBrush}">
+                                    <TextBlock Text="1" Foreground="White" FontSize="12" FontWeight="SemiBold"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock Grid.Column="1" TextWrapping="Wrap" VerticalAlignment="Center"
+                                           Text="把题目粘到左边的「题干」框。选项一行一个也粘上，A/B/C/D 会自己认出来。" />
+                            </Grid>
+
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Width="22" Height="22" CornerRadius="11" VerticalAlignment="Top"
+                                        Background="{ThemeResource AccentFillColorDefaultBrush}">
+                                    <TextBlock Text="2" Foreground="White" FontSize="12" FontWeight="SemiBold"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock Grid.Column="1" TextWrapping="Wrap" VerticalAlignment="Center"
+                                           Text="题目在屏幕上？点「截图识题」，或者用「选图片」找一张图，不用手敲。" />
+                            </Grid>
+
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Width="22" Height="22" CornerRadius="11" VerticalAlignment="Top"
+                                        Background="{ThemeResource AccentFillColorDefaultBrush}">
+                                    <TextBlock Text="3" Foreground="White" FontSize="12" FontWeight="SemiBold"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock Grid.Column="1" TextWrapping="Wrap" VerticalAlignment="Center"
+                                           Text="点「开始搜题」，或者直接按 Ctrl+Enter。答案排在右边，越可信越靠上。" />
+                            </Grid>
+
+                            <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                       Text="搜到满意的答案后点一下「存入本地题库」——下次同一题秒出，也不花 token。" />
+
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="重新看上手引导" Click="OnReplayOnboarding" />
+                                <Button Content="去设置配模型 / 导入题库" Click="OnGoSettings" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </ScrollViewer>
         </Grid>
