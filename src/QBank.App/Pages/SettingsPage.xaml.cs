@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -8,6 +8,7 @@ using QBank.Core.Ai;
 using QBank.Core.Models;
 using QBank.Core.Ocr;
 using QBank.Core.Ocs;
+using QBank.Core.Storage;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage.Pickers;
 
@@ -63,6 +64,10 @@ public sealed partial class SettingsPage : Page
                 case "tray":
                 case "window":
                     WindowCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
+                    break;
+                case "backup":
+                case "restore":
+                    BackupCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
                     break;
                 case "net":
                 case "network":
@@ -181,6 +186,10 @@ public sealed partial class SettingsPage : Page
             TrayHintBox.IsChecked = win.ShowTrayHint;
             RememberPlacementBox.IsChecked = win.RememberWindowPlacement;
             UpdateWindowTrayUi();
+
+            // 备份与恢复：范围默认「全部设置」，列表重读一次
+            if (BackupScopeBox.SelectedIndex < 0) BackupScopeBox.SelectedIndex = 0;
+            ReloadBackupList();
 
             RefreshStats();
         }
@@ -802,6 +811,398 @@ public sealed partial class SettingsPage : Page
     }
 
     // ── 保存 / 其它 ───────────────────────────────────────
+
+    // ── 备份与恢复 ────────────────────────────────────────
+
+    /// <summary>把界面上还没保存的改动先写进内存配置，保证备份的是眼前这份。</summary>
+    private void FlushUiToConfig()
+    {
+        foreach (var card in _cards) card.ApplyToProvider();
+        ApplyOcrSettingsToConfig();
+        ApplyOcsBridgeToConfig();
+        ApplyNetworkToConfig();
+        ApplyWindowToConfig();
+    }
+
+    private BackupScope CurrentBackupScope()
+        => (BackupScopeBox.SelectedItem as ComboBoxItem)?.Tag as string == "ai"
+            ? BackupScope.AiOnly
+            : BackupScope.All;
+
+    private void OnBackupScopeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // 加密与备注对两种范围都适用，这里只是刷新一下状态行
+        if (_loading) return;
+        UpdateBackupStatus("当前选择：" + (CurrentBackupScope() == BackupScope.AiOnly
+            ? "只备份 AI 接口与 Key。"
+            : "备份全部设置（AI 接口、OCS 题库、OCR、网络、窗口、局域网）。"));
+    }
+
+    private void UpdateBackupStatus(string text) => BackupStatusText.Text = text;
+
+    /// <summary>读口令框；两次不一致就返回 null 并提示。</summary>
+    private async Task<(bool Ok, string? Password)> ReadBackupPasswordAsync(bool requireMatch)
+    {
+        var pwd = BackupPasswordBox.Password ?? string.Empty;
+
+        if (string.IsNullOrEmpty(pwd))
+        {
+            if (requireMatch && BackupPasswordAgainBox.Password is { Length: > 0 })
+            {
+                await ShowDialogAsync("口令不一致", "第一栏没填口令，第二栏却填了。要么两栏都留空（不加密），要么两栏填一样的。");
+                return (false, null);
+            }
+
+            return (true, null);
+        }
+
+        if (requireMatch && pwd != (BackupPasswordAgainBox.Password ?? string.Empty))
+        {
+            await ShowDialogAsync("口令不一致", "两次输入的口令不一样，请重新输入。");
+            return (false, null);
+        }
+
+        return (true, pwd);
+    }
+
+    private BackupOptions BuildBackupOptions(BackupScope scope, string? password)
+        => new()
+        {
+            Scope = scope,
+            Password = password,
+            Note = string.IsNullOrWhiteSpace(BackupNoteBox.Text) ? null : BackupNoteBox.Text.Trim(),
+        };
+
+    /// <summary>把界面上的改动刷进内存配置对象（不落盘），得到一份可导出/可备份的快照。</summary>
+    private AppConfig BuildConfigSnapshot()
+    {
+        FlushUiToConfig();
+        return SettingsBackup.Clone(AppServices.Current.Config.Config);
+    }
+
+    private async void OnQuickBackup(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var (ok, password) = await ReadBackupPasswordAsync(requireMatch: true);
+            if (!ok) return;
+
+            var scope = CurrentBackupScope();
+            var options = BuildBackupOptions(scope, password);
+            var snapshot = BuildConfigSnapshot();
+            var path = SettingsBackup.QuickBackup(snapshot, AppServices.Current.Config.DataDir, options);
+
+            var info = SettingsBackup.PeekFile(path);
+            UpdateBackupStatus("已备份：" + path + (info is null ? string.Empty : "\n" + info.Describe()));
+            ReloadBackupList();
+
+            if (string.IsNullOrEmpty(password))
+            {
+                HeaderHint.Text = "已快速备份（未加密）";
+                await ShowDialogAsync("备份好了",
+                    "文件：" + path + "\n\n" +
+                    "这里面是明文，里面有你的 API Key。别随手发给别人，也别放在公共网盘里。\n" +
+                    "想加密的话，在「加密口令」里填一个再备份一次。");
+            }
+            else
+            {
+                HeaderHint.Text = "已快速备份（已加密）";
+                UpdateBackupStatus(UpdateBackupStatusText(path));
+            }
+        }
+        catch (Exception ex)
+        {
+            await ShowDialogAsync("备份失败", ex.Message);
+        }
+    }
+
+    private string UpdateBackupStatusText(string path)
+        => "已备份（已加密）：" + path + "\n· 恢复时需要同一个口令，忘了就打不开了 —— 请自己记好。";
+
+    private async void OnExportBackupFile(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var (ok, password) = await ReadBackupPasswordAsync(requireMatch: true);
+            if (!ok) return;
+
+            var picker = new FileSavePicker
+            {
+                SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
+                SuggestedFileName = "qbank-settings-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"),
+            };
+            picker.FileTypeChoices.Add("题库工坊设置备份", new List<string> { SettingsBackup.FileExtension });
+
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainAppWindow);
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+
+            var file = await picker.PickSaveFileAsync();
+            if (file is null) return;
+
+            var json = SettingsBackup.Export(BuildConfigSnapshot(), BuildBackupOptions(CurrentBackupScope(), password));
+            await File.WriteAllTextAsync(file.Path, json, new System.Text.UTF8Encoding(false));
+
+            UpdateBackupStatus("已导出：" + file.Path);
+            HeaderHint.Text = "已导出备份文件";
+        }
+        catch (Exception ex)
+        {
+            await ShowDialogAsync("导出失败", ex.Message);
+        }
+    }
+
+    private async void OnCopyBackup(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var (ok, password) = await ReadBackupPasswordAsync(requireMatch: true);
+            if (!ok) return;
+
+            var json = SettingsBackup.Export(BuildConfigSnapshot(), BuildBackupOptions(CurrentBackupScope(), password));
+            await CopyToClipboardAsync(json);
+
+            UpdateBackupStatus(string.IsNullOrEmpty(password)
+                ? "已复制到剪贴板（明文，含 Key，粘到安全的地方）。"
+                : "已复制到剪贴板（已加密，换台机器粘回去 + 同一个口令就能恢复）。");
+            HeaderHint.Text = "备份已复制";
+        }
+        catch (Exception ex)
+        {
+            await ShowDialogAsync("复制失败", ex.Message);
+        }
+    }
+
+    private async void OnRestoreQuickBackup(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not string path) return;
+        await RestoreFromAsync(() => Task.FromResult<string?>(File.Exists(path) ? File.ReadAllText(path) : null), path);
+    }
+
+    private async void OnDeleteQuickBackup(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not string path) return;
+
+        var dialog = new ContentDialog
+        {
+            Title = "删除这份备份？",
+            Content = new TextBlock
+            {
+                Text = "文件会被直接删掉，删了就没了：\n\n" + path,
+                TextWrapping = TextWrapping.Wrap,
+            },
+            PrimaryButtonText = "删除",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot,
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+        if (SettingsBackup.Delete(path))
+        {
+            UpdateBackupStatus("已删除：" + Path.GetFileName(path));
+            ReloadBackupList();
+        }
+        else
+        {
+            await ShowDialogAsync("删除失败", "文件可能被占用或没有权限：\n" + path);
+        }
+    }
+
+    private async void OnImportBackupFile(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary };
+            picker.FileTypeFilter.Add(SettingsBackup.FileExtension);
+            picker.FileTypeFilter.Add(".json");
+            picker.FileTypeFilter.Add(".txt");
+            picker.FileTypeFilter.Add("*");
+
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainAppWindow);
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+
+            var file = await picker.PickSingleFileAsync();
+            if (file is null) return;
+
+            await RestoreFromAsync(async () => await File.ReadAllTextAsync(file.Path), file.Path);
+        }
+        catch (Exception ex)
+        {
+            await ShowDialogAsync("读取失败", ex.Message);
+        }
+    }
+
+    private async void OnPasteBackupClipboard(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var package = Clipboard.GetContent();
+            if (!package.Contains(StandardDataFormats.Text))
+            {
+                await ShowDialogAsync("剪贴板里没有文字", "先把备份 JSON 复制到剪贴板，再来点这个按钮。");
+                return;
+            }
+
+            var text = await package.GetTextAsync();
+            await RestoreFromAsync(() => Task.FromResult<string?>(text), "（剪贴板）");
+        }
+        catch (Exception ex)
+        {
+            await ShowDialogAsync("读取剪贴板失败", ex.Message);
+        }
+    }
+
+    /// <summary>恢复的公共流程：看元信息 → 问口令 → 问覆盖还是合并 → 应用 → 重新加载界面。</summary>
+    private async Task RestoreFromAsync(Func<Task<string?>> loader, string sourceLabel)
+    {
+        string? content;
+        try
+        {
+            content = await loader();
+        }
+        catch (Exception ex)
+        {
+            await ShowDialogAsync("读取失败", ex.Message);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            await ShowDialogAsync("文件读不到内容", "来源：" + sourceLabel);
+            return;
+        }
+
+        var info = SettingsBackup.Peek(content);
+        if (info is null)
+        {
+            await ShowDialogAsync("不是本程序的备份",
+                "这个文件里没有 qbank-settings 标记，看起来不是题库工坊导出的设置备份。\n\n" +
+                "如果你要导入的是题库题目，请去「本地题库」页用导入功能。");
+            return;
+        }
+
+        // 加密的先要口令
+        string? password = null;
+        if (info.Encrypted)
+        {
+            password = await AskPasswordAsync(info);
+            if (password is null) return;
+        }
+
+        var mode = await AskImportModeAsync(info);
+        if (mode is null) return;
+
+        var result = SettingsBackup.Import(content, AppServices.Current.Config.Config, mode.Value, password);
+        if (!result.Ok)
+        {
+            await ShowDialogAsync("恢复失败", result.Error ?? "未知原因");
+            return;
+        }
+
+        AppServices.Current.SaveConfig();
+
+        // 配置对象换过内容了，界面必须重读，否则显示的旧值
+        _cards.Clear();
+        ReloadFromConfig();
+        (App.MainAppWindow as MainWindow)?.ApplyTraySettings();
+
+        HeaderHint.Text = "已恢复设置";
+        UpdateBackupStatus("已从 " + (info.FileName == "（剪贴板）" ? "剪贴板" : info.FileName) + " 恢复：\n· " +
+                           string.Join("\n· ", result.Changes));
+
+        await ShowDialogAsync("恢复完成",
+            "已应用：" + (mode.Value == BackupImportMode.Merge ? "合并" : "覆盖") + "\n\n" +
+            "· " + string.Join("\n· ", result.Changes) + "\n\n" +
+            "设置已保存。局域网共享、OCS 接口、网络出口都已按新配置重启。", wide: true);
+    }
+
+    private async Task<string?> AskPasswordAsync(BackupInfo info)
+    {
+        var box = new PasswordBox { PlaceholderText = "这份备份加了口令", Width = 320 };
+        var text = new TextBlock
+        {
+            Text = "备份信息：" + info.Describe() +
+                   (string.IsNullOrWhiteSpace(info.Note) ? string.Empty : "\n备注：" + info.Note),
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Microsoft.UI.Xaml.Thickness(0, 0, 0, 10),
+        };
+
+        var panel = new StackPanel();
+        panel.Children.Add(text);
+        panel.Children.Add(box);
+
+        var dialog = new ContentDialog
+        {
+            Title = "输入备份口令",
+            Content = panel,
+            PrimaryButtonText = "解密",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot,
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return null;
+
+        var pwd = box.Password ?? string.Empty;
+        if (string.IsNullOrEmpty(pwd))
+        {
+            await ShowDialogAsync("口令是空的", "这份备份加密过，必须填口令。");
+            return null;
+        }
+
+        return pwd;
+    }
+
+    private async Task<BackupImportMode?> AskImportModeAsync(BackupInfo info)
+    {
+        var text = new TextBlock
+        {
+            Text = "备份内容：" + info.Describe() +
+                   (string.IsNullOrWhiteSpace(info.Note) ? string.Empty : "\n备注：" + info.Note) + "\n\n" +
+                   "· 覆盖：当前设置完全变成备份里的样子（备份里没填 Key 的服务商会变空）\n" +
+                   "· 合并：AI 服务商和 OCS 题库按条目更新，没填 Key 的条目不会把现有 Key 抹掉；其余设置仍然被覆盖",
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 560,
+        };
+
+        var dialog = new ContentDialog
+        {
+            Title = "覆盖还是合并？",
+            Content = text,
+            PrimaryButtonText = "覆盖",
+            SecondaryButtonText = "合并",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Secondary,
+            XamlRoot = XamlRoot,
+        };
+
+        return await dialog.ShowAsync() switch
+        {
+            ContentDialogResult.Primary => BackupImportMode.Replace,
+            ContentDialogResult.Secondary => BackupImportMode.Merge,
+            _ => null,
+        };
+    }
+
+    private void ReloadBackupList()
+    {
+        try
+        {
+            var items = SettingsBackup.ListQuickBackups(AppServices.Current.Config.DataDir);
+            BackupList.ItemsSource = items;
+            BackupList.Visibility = items.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+            BackupEmptyHint.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            if (items.Count > 0)
+                UpdateBackupStatus($"backups 文件夹里有 {items.Count} 份快速备份。");
+        }
+        catch (Exception ex)
+        {
+            BackupEmptyHint.Visibility = Visibility.Visible;
+            BackupEmptyHint.Text = "读取备份列表失败：" + ex.Message;
+        }
+    }
 
     // ── 窗口与托盘 ────────────────────────────────────────
 

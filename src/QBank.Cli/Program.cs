@@ -52,6 +52,7 @@ internal static class Program
             await RunAsync("AI 答题", () => TestAiAnswerAsync(workDir));
             await RunAsync("AI 模型列表", () => TestModelCatalogAsync(workDir));
             await RunAsync("网络出口（死代理绕行）", TestNetworkConfigAsync);
+            await RunAsync("设置备份与恢复", () => TestSettingsBackupAsync(workDir));
             await RunAsync("本地题库增删查", () => TestLocalBankAsync(workDir));
             await RunAsync("题库导入导出", () => TestImportExportAsync(workDir));
             await RunAsync("历史记录", () => TestHistoryAsync(workDir));
@@ -983,5 +984,160 @@ internal static class Program
         // 空题干应报输入错误
         var empty = await service.SearchAsync(new SearchRequest { Title = "  " });
         CheckEqual("input", empty.Outcomes[0].SourceId, "空题干应给输入错误");
+    }
+
+    /// <summary>
+    /// 设置备份与恢复：导出 → 读元信息 → 覆盖导入 → 合并导入 → 口令加密往返 → 快速备份文件读写。
+    /// </summary>
+    private static async Task TestSettingsBackupAsync(string workDir)
+    {
+        var source = AppConfig.CreateDefault();
+        source.AiProviders = new List<AiProviderConfig>
+        {
+            new()
+            {
+                Id = "p1", Name = "测试-DeepSeek", ProviderKind = "deepseek",
+                BaseUrl = "https://api.deepseek.com/v1", Model = "deepseek-chat",
+                ApiKey = "sk-test-1234567890", Enabled = true, Priority = 1,
+            },
+            new()
+            {
+                Id = "p2", Name = "测试-Ollama", ProviderKind = "ollama",
+                BaseUrl = "http://127.0.0.1:11434/v1", Model = "qwen3:8b",
+                ApiKey = string.Empty, Enabled = false, UseJsonMode = false,
+            },
+        };
+        source.Search.TimeoutSeconds = 45;
+        source.Search.MaxParallel = 6;
+        source.Ocr.Engine = "windows";
+        source.Network.ProxyMode = "direct";
+        source.OcsBridge.Port = 18999;
+        source.DataDir = @"C:\should-not-be-restored";
+
+        // ── 1. 明文导出 + 元信息 ──
+        var plain = SettingsBackup.Export(source, new BackupOptions { Note = "单测备份" });
+        Check(plain.Contains("\"qbank-settings\""), "导出文本里应有 format 标记");
+
+        var info = SettingsBackup.Peek(plain);
+        Check(info is not null, "应能读到备份元信息");
+        CheckEqual(2, info!.AiProviderCount, "服务商数量");
+        CheckEqual(false, info.Encrypted, "明文导出应为未加密");
+        CheckEqual(true, info.HasApiKeys, "应有 Key");
+        CheckEqual("单测备份", info.Note, "备注");
+
+        // ── 2. 覆盖导入到一份空配置 ──
+        var target = AppConfig.CreateDefault();
+        target.DataDir = @"D:\qbank-data";
+        target.AiProviders = new List<AiProviderConfig>();
+
+        var replaced = SettingsBackup.Import(plain, target, BackupImportMode.Replace);
+        Check(replaced.Ok, "覆盖导入应成功：" + replaced.Error);
+        CheckEqual(2, target.AiProviders.Count, "导入后服务商数量");
+        CheckEqual("sk-test-1234567890", target.AiProviders[0].ApiKey, "Key 应被带过来");
+        CheckEqual(45, target.Search.TimeoutSeconds, "搜题超时应被覆盖");
+        CheckEqual("windows", target.Ocr.Engine, "OCR 引擎应被覆盖");
+        CheckEqual("direct", target.Network.ProxyMode, "网络出口应被覆盖");
+        CheckEqual(18999, target.OcsBridge.Port, "OCS 接口端口应被覆盖");
+        CheckEqual(@"D:\qbank-data", target.DataDir, "数据目录必须保留本机值");
+        CheckEqual(int.MinValue, target.Window.WindowX, "窗口位置应被清掉");
+
+        // ── 3. 合并导入：不抹掉现有 Key ──
+        var mergeTarget = AppConfig.CreateDefault();
+        mergeTarget.AiProviders = new List<AiProviderConfig>
+        {
+            new()
+            {
+                Id = "p1", Name = "旧名字", ProviderKind = "deepseek",
+                BaseUrl = "https://api.deepseek.com/v1", Model = "deepseek-chat",
+                ApiKey = "sk-keep-me", Enabled = true,
+            },
+        };
+        mergeTarget.OcsSources = new List<AnswererWrapper>();
+
+        // 备份里 p1 的 Key 是空的，合并后应该保留本机原来的 Key
+        var noKeySource = AppConfig.CreateDefault();
+        noKeySource.AiProviders = new List<AiProviderConfig>
+        {
+            new()
+            {
+                Id = "p1", Name = "新名字", ProviderKind = "deepseek",
+                BaseUrl = "https://api.deepseek.com/v1", Model = "deepseek-v3",
+                ApiKey = string.Empty, Enabled = true,
+            },
+        };
+        var noKeyBackup = SettingsBackup.Export(noKeySource);
+
+        var merged = SettingsBackup.Import(noKeyBackup, mergeTarget, BackupImportMode.Merge);
+        Check(merged.Ok, "合并导入应成功：" + merged.Error);
+        CheckEqual(1, mergeTarget.AiProviders.Count, "合并后仍是 1 个服务商");
+        CheckEqual("sk-keep-me", mergeTarget.AiProviders[0].ApiKey, "备份里 Key 为空时不能覆盖本机 Key");
+        CheckEqual("新名字", mergeTarget.AiProviders[0].Name, "其余字段应被更新");
+        CheckEqual("deepseek-v3", mergeTarget.AiProviders[0].Model, "模型应被更新");
+
+        // ── 4. 只备份 AI 的范围 ──
+        var aiOnly = SettingsBackup.Export(source, new BackupOptions { Scope = BackupScope.AiOnly });
+        var aiInfo = SettingsBackup.Peek(aiOnly);
+        Check(aiInfo is not null, "只备份 AI 的元信息也应可读");
+        CheckEqual(BackupScope.AiOnly, aiInfo!.Scope, "范围为仅 AI");
+        CheckEqual(0, aiInfo.OcsSourceCount, "只备份 AI 时 OCS 题库数量应为 0");
+
+        var aiTarget = AppConfig.CreateDefault();
+        aiTarget.Search.TimeoutSeconds = 30;
+        aiTarget.AiProviders = new List<AiProviderConfig>();
+        var aiResult = SettingsBackup.Import(aiOnly, aiTarget, BackupImportMode.Replace);
+        Check(aiResult.Ok, "仅 AI 恢复应成功：" + aiResult.Error);
+        CheckEqual(2, aiTarget.AiProviders.Count, "仅 AI 恢复后服务商数量");
+        CheckEqual(30, aiTarget.Search.TimeoutSeconds, "仅 AI 恢复不该动其它设置");
+
+        // ── 5. 口令加密往返 ──
+        var encrypted = SettingsBackup.Export(source, new BackupOptions { Password = "鱼鱼的口令" });
+        var encInfo = SettingsBackup.Peek(encrypted);
+        Check(encInfo is not null, "加密备份的元信息也应可读（不需要口令）");
+        CheckEqual(true, encInfo!.Encrypted, "应标记为已加密");
+        CheckEqual(false, encrypted.Contains("sk-test-1234567890"), "加密后文件里不能出现明文 Key");
+        CheckEqual(2, encInfo.AiProviderCount, "加密备份也应能读到服务商数量");
+
+        var encTarget = AppConfig.CreateDefault();
+        encTarget.AiProviders = new List<AiProviderConfig>();
+        var wrong = SettingsBackup.Import(encrypted, encTarget, BackupImportMode.Replace, "错误口令");
+        Check(!wrong.Ok, "口令错了应该失败");
+        Check(wrong.Error is not null && wrong.Error.Contains("口令"), "错误提示应提到口令");
+
+        var noPwd = SettingsBackup.Import(encrypted, encTarget, BackupImportMode.Replace);
+        Check(!noPwd.Ok, "不给口令应该失败");
+
+        var right = SettingsBackup.Import(encrypted, encTarget, BackupImportMode.Replace, "鱼鱼的口令");
+        Check(right.Ok, "正确口令应能恢复：" + right.Error);
+        CheckEqual("sk-test-1234567890", encTarget.AiProviders[0].ApiKey, "解密后 Key 应完好");
+
+        // ── 6. 快速备份文件 ──
+        var backupDir = Path.Combine(workDir, "backup-test");
+        Directory.CreateDirectory(backupDir);
+
+        var path = SettingsBackup.QuickBackup(source, backupDir, new BackupOptions { Note = "文件测试" });
+        Check(File.Exists(path), "快速备份文件应存在：" + path);
+        Check(path.EndsWith(SettingsBackup.FileExtension, StringComparison.OrdinalIgnoreCase), "扩展名应为 .qbankcfg");
+
+        var listed = SettingsBackup.ListQuickBackups(backupDir);
+        CheckEqual(1, listed.Count, "备份列表应有一条");
+        CheckEqual("文件测试", listed[0].Note, "列表应带回备注");
+        CheckEqual(false, listed[0].SizeText.Length == 0, "应有大小文本");
+
+        // 同一秒连点两次不该互相覆盖
+        var path2 = SettingsBackup.QuickBackup(source, backupDir);
+        Check(path != path2, "连点两次应生成两个文件");
+        CheckEqual(2, SettingsBackup.ListQuickBackups(backupDir).Count, "此时应有两份");
+
+        // ── 7. 拒绝不是备份的文件 ──
+        var garbage = SettingsBackup.Import("{\"hello\":1}", new AppConfig(), BackupImportMode.Replace);
+        Check(!garbage.Ok && garbage.Error is not null && garbage.Error.Contains("题库工坊"), "非本程序文件应被拒绝");
+
+        CheckEqual(false, SettingsBackup.LooksLikeBackup("不是 json"), "非 JSON 不该被认成备份");
+
+        // ── 8. 删除 ──
+        CheckEqual(true, SettingsBackup.Delete(path2), "删除应成功");
+        CheckEqual(1, SettingsBackup.ListQuickBackups(backupDir).Count, "删除后应剩一份");
+
+        await Task.CompletedTask;
     }
 }

@@ -290,6 +290,94 @@
                     </StackPanel>
                 </Border>
 
+                <!-- 备份与恢复 -->
+                <Border x:Name="BackupCard" Style="{StaticResource CardBorder}">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="备份与恢复" Style="{StaticResource SectionTitle}" Margin="0" />
+                        <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                   Text="把 AI 接口、API Key、OCS 题库、OCR 和网络设置一起打包成一个小文件。换机器、重装系统、调坏了想退回上一版，都不用再一行行重填。题库和搜索历史在数据库里，用下面的「立即备份数据库」单独备份。" />
+
+                        <Grid ColumnSpacing="10" RowSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="备份内容" Style="{StaticResource FieldLabel}" Width="76" />
+                            <ComboBox x:Name="BackupScopeBox" Grid.Row="0" Grid.Column="1" HorizontalAlignment="Left" Width="240"
+                                      SelectionChanged="OnBackupScopeChanged">
+                                <ComboBoxItem Content="全部设置（推荐）" Tag="all" />
+                                <ComboBoxItem Content="只备份 AI 接口和 Key" Tag="ai" />
+                            </ComboBox>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="加密口令" Style="{StaticResource FieldLabel}" />
+                            <Grid Grid.Row="1" Grid.Column="1" ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <PasswordBox x:Name="BackupPasswordBox" Grid.Column="0"
+                                             PlaceholderText="可选：填了就用它加密（Key 不会以明文落盘）" />
+                                <PasswordBox x:Name="BackupPasswordAgainBox" Grid.Column="1"
+                                             PlaceholderText="再输一遍确认" />
+                            </Grid>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="备注" Style="{StaticResource FieldLabel}" />
+                            <TextBox x:Name="BackupNoteBox" Grid.Row="2" Grid.Column="1"
+                                     PlaceholderText="可选，比如「换电脑前的备份」，恢复时会显示" />
+                        </Grid>
+
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="快速备份" Click="OnQuickBackup" Style="{StaticResource AccentButtonStyle}" />
+                            <Button Content="导出到文件…" Click="OnExportBackupFile" />
+                            <Button Content="复制到剪贴板" Click="OnCopyBackup" />
+                        </StackPanel>
+
+                        <TextBlock x:Name="BackupStatusText" Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                   IsTextSelectionEnabled="True" />
+
+                        <TextBlock Text="已有的快速备份" Style="{StaticResource FieldLabel}" Margin="0,6,0,0" />
+                        <ListView x:Name="BackupList" SelectionMode="None" MaxHeight="240" Visibility="Collapsed"
+                                  HorizontalContentAlignment="Stretch">
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid ColumnSpacing="10" Padding="0,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="2">
+                                            <TextBlock Text="{Binding Describe}" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding Note}" Style="{StaticResource Subtle}"
+                                                       TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="恢复" Click="OnRestoreQuickBackup"
+                                                Tag="{Binding FilePath}" />
+                                        <Button Grid.Column="2" Content="删除" Click="OnDeleteQuickBackup"
+                                                Tag="{Binding FilePath}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                        <TextBlock x:Name="BackupEmptyHint" Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                   Text="还没有快速备份。点上方的「快速备份」，文件会存在数据目录的 backups 文件夹里。" />
+
+                        <TextBlock Text="从别处恢复" Style="{StaticResource FieldLabel}" Margin="0,6,0,0" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="从文件恢复…" Click="OnImportBackupFile" />
+                            <Button Content="从剪贴板恢复" Click="OnPasteBackupClipboard" />
+                        </StackPanel>
+                        <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                   Text="恢复时会让你选「覆盖」还是「合并」：覆盖 = 完全变成备份里的样子；合并 = AI 服务商和 OCS 题库按条目更新，没填 Key 的条目不会把现有 Key 抹掉。" />
+                    </StackPanel>
+                </Border>
+
                 <!-- 数据 -->
                 <Border x:Name="DataCard" Style="{StaticResource CardBorder}">
                     <StackPanel Spacing="10">
