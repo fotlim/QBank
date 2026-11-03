@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Page
     x:Class="QBank.App.Pages.SettingsPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -270,6 +270,23 @@
 
                         <TextBlock x:Name="NetworkStatusText" Style="{StaticResource Subtle}" TextWrapping="Wrap"
                                    IsTextSelectionEnabled="True" />
+                    </StackPanel>
+                </Border>
+
+                <!-- 窗口与托盘 -->
+                <Border x:Name="WindowCard" Style="{StaticResource CardBorder}">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="窗口与托盘" Style="{StaticResource SectionTitle}" Margin="0" />
+                        <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                   Text="题库工坊在后台跑着局域网共享和 OCS 接口服务，所以关掉窗口不等于退出程序。默认收进系统托盘继续跑，双击托盘图标叫回来。" />
+
+                        <CheckBox x:Name="TrayEnableBox" Content="启用系统托盘图标" Checked="OnWindowTrayOptionChanged" Unchecked="OnWindowTrayOptionChanged" />
+                        <CheckBox x:Name="TrayCloseBox" Content="关窗口时收进托盘（不退出程序）" />
+                        <CheckBox x:Name="TrayMinimizeBox" Content="最小化时也收进托盘" />
+                        <CheckBox x:Name="TrayHintBox" Content="第一次收进托盘时弹个气泡说明" />
+                        <CheckBox x:Name="RememberPlacementBox" Content="记住窗口大小和位置" />
+
+                        <TextBlock x:Name="TrayStatusText" Style="{StaticResource Subtle}" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
 

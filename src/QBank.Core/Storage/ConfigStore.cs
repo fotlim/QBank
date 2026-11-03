@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using QBank.Core.Models;
 
 namespace QBank.Core.Storage;
@@ -263,6 +263,7 @@ public sealed class ConfigStore
         cfg.OcsBridge ??= new OcsBridgeConfig();
         cfg.Ocr ??= new OcrConfig();
         cfg.Network ??= new NetworkConfig();
+        cfg.Window ??= new WindowConfig();
         cfg.Ocr.Umi ??= new UmiOcrConfig();
         cfg.Ocr.Custom ??= new CustomOcrConfig();
         cfg.LocalBank.AutoCacheKinds ??= new List<string> { "ai", "lan" };

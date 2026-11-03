@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -59,6 +59,10 @@ public sealed partial class SettingsPage : Page
                     break;
                 case "data":
                     DataCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
+                    break;
+                case "tray":
+                case "window":
+                    WindowCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
                     break;
                 case "net":
                 case "network":
@@ -168,6 +172,15 @@ public sealed partial class SettingsPage : Page
             ProxyFallbackBox.IsChecked = net.FallbackToDirectOnProxyFailure;
             UpdateProxyModeUi();
             UpdateNetworkStatus();
+
+            // 窗口与托盘
+            var win = cfg.Window ??= new WindowConfig();
+            TrayEnableBox.IsChecked = win.EnableTray;
+            TrayCloseBox.IsChecked = win.CloseToTray;
+            TrayMinimizeBox.IsChecked = win.MinimizeToTray;
+            TrayHintBox.IsChecked = win.ShowTrayHint;
+            RememberPlacementBox.IsChecked = win.RememberWindowPlacement;
+            UpdateWindowTrayUi();
 
             RefreshStats();
         }
@@ -790,6 +803,64 @@ public sealed partial class SettingsPage : Page
 
     // ── 保存 / 其它 ───────────────────────────────────────
 
+    // ── 窗口与托盘 ────────────────────────────────────────
+
+    private void ApplyWindowToConfig()
+    {
+        var win = AppServices.Current.Config.Config.Window ??= new WindowConfig();
+        win.EnableTray = TrayEnableBox.IsChecked == true;
+        win.CloseToTray = TrayCloseBox.IsChecked == true;
+        win.MinimizeToTray = TrayMinimizeBox.IsChecked == true;
+        win.ShowTrayHint = TrayHintBox.IsChecked == true;
+        win.RememberWindowPlacement = RememberPlacementBox.IsChecked == true;
+    }
+
+    private void OnWindowTrayOptionChanged(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        UpdateWindowTrayUi();
+    }
+
+    private void UpdateWindowTrayUi()
+    {
+        var enabled = TrayEnableBox.IsChecked == true;
+        TrayCloseBox.IsEnabled = enabled;
+        TrayMinimizeBox.IsEnabled = enabled;
+        TrayHintBox.IsEnabled = enabled;
+
+        if (!enabled)
+        {
+            TrayStatusText.Text = "· 不使用托盘 —— 关掉窗口就是退出程序，局域网共享和 OCS 接口服务会一起停。\n" +
+                                  "· 如果你只想要普通单机使用，这样最省资源。";
+            return;
+        }
+
+        var closeToTray = TrayCloseBox.IsChecked == true;
+        var minimizeToTray = TrayMinimizeBox.IsChecked == true;
+
+        // 托盘能不能真用，得看运行时有没有登记成功
+        var reason = MainWindow.TrayUnavailableReason;
+        if (reason is not null)
+        {
+            TrayStatusText.Text = "· 托盘图标没能登记成功：" + reason + "\n" +
+                                  "· 这种情况下关窗口会直接退出，不会留在后台。程序本身功能不受影响。";
+            return;
+        }
+
+        var lines = new List<string>
+        {
+            closeToTray
+                ? "· 关窗口 → 收进托盘，程序继续在后台跑"
+                : "· 关窗口 → 直接退出程序（托盘图标在运行期间仍然常驻）",
+        };
+
+        if (minimizeToTray) lines.Add("· 最小化 → 也收进托盘，不占任务栏");
+
+        lines.Add("· 托盘图标：双击 = 打开主界面，右键 = 打开数据目录 / 退出程序");
+        lines.Add("· 退出请走托盘菜单的「退出题库工坊」，这样会正常保存配置");
+        TrayStatusText.Text = string.Join("\n", lines);
+    }
+
     private void OnSave(object sender, RoutedEventArgs e)
     {
         try
@@ -807,11 +878,14 @@ public sealed partial class SettingsPage : Page
             ApplyOcrSettingsToConfig();
             ApplyOcsBridgeToConfig();
             ApplyNetworkToConfig();
+            ApplyWindowToConfig();
 
             AppServices.Current.SaveConfig();
             UpdateOcrDescribe();
             UpdateOcsBridgeStatus();
             UpdateNetworkStatus();
+            UpdateWindowTrayUi();
+            (App.MainAppWindow as MainWindow)?.ApplyTraySettings();
             HeaderHint.Text = $"已保存 · {DateTimeOffset.Now:HH:mm:ss}";
         }
         catch (Exception ex)

@@ -29,6 +29,8 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             CrashLog("AppDomain 未处理异常", e.ExceptionObject as Exception);
 
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => ShutdownTray();
+
         UnhandledException += (_, e) =>
         {
             CrashLog("XAML 未处理异常", e.Exception);
@@ -58,6 +60,19 @@ public partial class App : Application
         {
             CrashLog("主窗口创建失败", ex);
             throw;
+        }
+    }
+
+    /// <summary>进程真要退出了，先把托盘图标摘掉，否则它会变成点不动的僵尸。</summary>
+    public static void ShutdownTray()
+    {
+        try
+        {
+            (MainAppWindow as MainWindow)?.DisposeTray();
+        }
+        catch
+        {
+            // 退出路径上不抛
         }
     }
 

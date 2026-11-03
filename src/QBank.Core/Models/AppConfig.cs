@@ -36,6 +36,9 @@ public sealed class AppConfig
     /// <summary>网络出口设置（代理）。</summary>
     public NetworkConfig Network { get; set; } = new();
 
+    /// <summary>窗口与托盘行为。</summary>
+    public WindowConfig Window { get; set; } = new();
+
     /// <summary>首次运行写入演示与预设。</summary>
     public static AppConfig CreateDefault()
     {
@@ -534,4 +537,51 @@ public sealed class NetworkConfig
         "custom" => string.IsNullOrWhiteSpace(ProxyUrl) ? "自定义代理（未填地址，按直连）" : "自定义代理 " + ProxyUrl.Trim(),
         _ => "跟随系统代理",
     };
+}
+
+/// <summary>
+/// 窗口与托盘行为。
+///
+/// 关窗口默认只是隐藏到托盘 —— 程序本身还在跑局域网共享和 OCS 接口服务，
+/// 关掉窗口就把服务停了会让别人的 OCS 脚本突然失效。
+/// </summary>
+public sealed class WindowConfig
+{
+    /// <summary>是否启用托盘图标。关掉就退回「关窗口 = 退出」的老行为。</summary>
+    public bool EnableTray { get; set; } = true;
+
+    /// <summary>关窗口时最小化到托盘而不是退出。EnableTray 为 false 时无效。</summary>
+    public bool CloseToTray { get; set; } = true;
+
+    /// <summary>最小化窗口时也收进托盘（不进任务栏）。</summary>
+    public bool MinimizeToTray { get; set; }
+
+    /// <summary>第一次收进托盘时弹个气泡说明「程序还在后台跑」，只弹一次。</summary>
+    public bool ShowTrayHint { get; set; } = true;
+
+    /// <summary>记住上次退出时的窗口大小与位置。</summary>
+    public bool RememberWindowPlacement { get; set; } = true;
+
+    public int WindowWidth { get; set; } = 1280;
+    public int WindowHeight { get; set; } = 840;
+    public int WindowX { get; set; } = int.MinValue;
+    public int WindowY { get; set; } = int.MinValue;
+
+    /// <summary>是否为最大化启动/退出。</summary>
+    public bool WindowMaximized { get; set; }
+
+    /// <summary>一句话描述当前托盘策略，界面上显示用。</summary>
+    public string Describe() => !EnableTray
+        ? "不使用托盘（关窗口即退出）"
+        : CloseToTray
+            ? "收进系统托盘，后台继续跑"
+            : "托盘图标常驻，关窗口仍会退出";
+
+    /// <summary>把记下来的窗口尺寸夹到合理范围，防止配置被改坏后窗口不可见。</summary>
+    public (int Width, int Height) SafeSize()
+    {
+        var w = WindowWidth < 720 ? 1280 : Math.Min(WindowWidth, 6000);
+        var h = WindowHeight < 480 ? 840 : Math.Min(WindowHeight, 4000);
+        return (w, h);
+    }
 }

@@ -87,7 +87,7 @@ public static class UmiOcrEngine
     }
 
     /// <summary>引擎目录（exe 所在目录），models 目录就在它下面。</summary>
-    public static string? EngineDirectory(string exePath)
+    public static string? EngineDirectory(string? exePath)
         => string.IsNullOrWhiteSpace(exePath) ? null : Path.GetDirectoryName(exePath);
 
     /// <summary>列出引擎目录下可用的语言配置（models/config_*.txt）。</summary>
