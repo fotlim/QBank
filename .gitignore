@@ -1,4 +1,4 @@
-﻿# 构建产物
+# 构建产物
 bin/
 obj/
 publish/
@@ -6,8 +6,9 @@ publish/
 *.suo
 .vs/
 
-# 安装包产物
+# 安装包产物与安装测试残留
 install/Output/
+install/.t*/
 install/.test/
 
 # 运行时数据
