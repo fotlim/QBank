@@ -148,6 +148,8 @@
                                 <TextBlock Text="网页搜索 · 不用花钱的答案来源" Style="{StaticResource SectionTitle}" Margin="0" />
                                 <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
                                            Text="先拿题干去搜索引擎搜一圈，从结果页里找答案。把握够就直接用，不再花 token 问模型 —— 没有模型也能用。" />
+                                <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                           Text="每次搜题它都会跑一遍。国内这几家会按 IP 限流：被跳去验证页时程序会自动换引擎、换手机版入口，并把刚被限流的引擎冷却 10 分钟，所以偶尔看着像「没调用」，其实是换了条路。" />
                             </StackPanel>
 
                             <CheckBox x:Name="WebEnableBox" Content="启用网页搜索"
@@ -307,10 +309,11 @@
                             </StackPanel>
 
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <ComboBox x:Name="OcrEngineCombo" Header="识别引擎" Width="260" SelectionChanged="OnOcrEngineChanged">
+                                <ComboBox x:Name="OcrEngineCombo" Header="识别引擎" Width="300" SelectionChanged="OnOcrEngineChanged">
                                     <ComboBoxItem Content="Umi-OCR / PaddleOCR（离线，推荐）" Tag="umi" />
-                                    <ComboBoxItem Content="Windows 系统 OCR" Tag="windows" />
-                                    <ComboBoxItem Content="Ollama 视觉模型" Tag="ollama" />
+                                    <ComboBoxItem Content="视觉大模型（联网，认得更准）" Tag="vision" />
+                                    <ComboBoxItem Content="Windows 系统 OCR（零下载）" Tag="windows" />
+                                    <ComboBoxItem Content="Ollama 本机视觉模型" Tag="ollama" />
                                     <ComboBoxItem Content="自定义 HTTP 接口" Tag="custom" />
                                     <ComboBoxItem Content="关闭" Tag="none" />
                                 </ComboBox>
@@ -319,6 +322,7 @@
 
                             <StackPanel x:Name="UmiPanel" Spacing="8">
                                 <TextBlock Text="Umi-OCR 设置" Style="{StaticResource FieldLabel}" />
+                                <TextBlock x:Name="UmiBundledHint" Style="{StaticResource Subtle}" TextWrapping="Wrap" />
                                 <CheckBox x:Name="UmiUseHttp" Content="优先使用 Umi-OCR 的 HTTP 服务（未开启时自动直连引擎）" />
                                 <TextBox x:Name="UmiApiUrl" Header="HTTP 地址" PlaceholderText="http://127.0.0.1:1224" />
                                 <TextBox x:Name="UmiInstallDir" Header="安装目录（留空自动探测）" PlaceholderText="D:\Umi-OCR" />
@@ -328,6 +332,24 @@
                                              PlaceholderText="models/config_chinese.txt" />
                                     <Button VerticalAlignment="Bottom" Content="探测安装位置" Click="OnDetectUmi" />
                                 </StackPanel>
+                            </StackPanel>
+
+                            <StackPanel x:Name="VisionOcrPanel" Spacing="8" Visibility="Collapsed">
+                                <TextBlock Text="视觉大模型识别" Style="{StaticResource FieldLabel}" />
+                                <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                           Text="用「1 · 模型与网络」里已经配好的服务商读图，不用另外填 key。需要模型支持图片输入（如硅基流动的 Qwen2.5-VL、百炼的 qwen-vl-max、OpenAI 的 gpt-4o-mini）。按次计费，不占本地硬盘。" />
+                                <ComboBox x:Name="VisionProviderCombo" Header="用哪个服务商" HorizontalAlignment="Stretch"
+                                          SelectionChanged="OnVisionProviderChanged" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <AutoSuggestBox x:Name="VisionModelBox" Header="模型名（留空用服务商默认）" Width="360"
+                                                    PlaceholderText="Qwen/Qwen2.5-VL-72B-Instruct" />
+                                    <Button VerticalAlignment="Bottom" Content="拉取该服务商的模型" Click="OnFetchVisionModels" />
+                                </StackPanel>
+                                <TextBox x:Name="VisionBaseUrl" Header="或者：直接填接口地址（留空则用上面的服务商）"
+                                         PlaceholderText="https://api.siliconflow.cn/v1" />
+                                <PasswordBox x:Name="VisionApiKey" Header="接口 Key（配合上面的地址）" />
+                                <TextBox x:Name="VisionPrompt" Header="识别提示词（留空用内置）"
+                                         AcceptsReturn="True" TextWrapping="Wrap" Height="64" />
                             </StackPanel>
 
                             <StackPanel x:Name="WindowsOcrPanel" Spacing="8" Visibility="Collapsed">

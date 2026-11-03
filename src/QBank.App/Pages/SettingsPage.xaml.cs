@@ -267,6 +267,14 @@ public sealed partial class SettingsPage : Page
             UmiInstallDir.Text = cfg.Ocr.Umi.InstallDirectory;
             UmiExePath.Text = cfg.Ocr.Umi.EngineExePath;
             UmiConfigPath.Text = cfg.Ocr.Umi.ConfigPath;
+
+            cfg.Ocr.Vision ??= new VisionOcrConfig();
+            FillVisionProviders(cfg, cfg.Ocr.Vision.ProviderId);
+            VisionModelBox.Text = cfg.Ocr.Vision.Model;
+            VisionBaseUrl.Text = cfg.Ocr.Vision.BaseUrlOverride;
+            VisionApiKey.Password = cfg.Ocr.Vision.ApiKeyOverride;
+            VisionPrompt.Text = cfg.Ocr.Vision.Prompt;
+
             OllamaBaseUrl.Text = cfg.Ocr.OllamaBaseUrl;
             OllamaModelBox.Text = cfg.Ocr.OllamaModel;
             CustomOcrUrl.Text = cfg.Ocr.Custom.Url;
@@ -435,15 +443,19 @@ public sealed partial class SettingsPage : Page
         WebStatusText.Text = $"正在用{engineName}搜「中国的首都是哪座城市？」…";
         try
         {
+            // 手动点测试 = 用户想现在就要结果，把限流冷却清掉重新试一遍
+            WebSearchSource.ResetCooldown();
+
             var outcome = await AppServices.Current.Web.SearchAsync(request, cfg);
 
             if (outcome.Hits.Count > 0)
             {
                 var hit = outcome.Hits[0];
-                WebStatusText.Text = $"✅ 用{engineName}搜到了：{hit.Answer}（把握 {hit.Score:P0}）";
+                var usedNote = outcome.Notices.Count > 0 ? "\n\n" + string.Join("\n", outcome.Notices) : string.Empty;
+                WebStatusText.Text = $"✅ 搜到了：{hit.Answer}（把握 {hit.Score:P0}）";
                 await ShowDialogAsync("网页搜索测试",
-                    $"引擎：{engineName}\n耗时：{outcome.ElapsedMs}ms\n\n题干：中国的首都是哪座城市？\nA. 上海　B. 北京　C. 广州　D. 深圳\n\n" +
-                    $"判定答案：{hit.Answer}\n把握：{hit.Score:P0}（可信线 {cfg.WebSearch.MinScore:P0}）\n\n理由：\n{hit.Note}",
+                    $"设定引擎：{engineName}\n耗时：{outcome.ElapsedMs}ms\n\n题干：中国的首都是哪座城市？\nA. 上海　B. 北京　C. 广州　D. 深圳\n\n" +
+                    $"判定答案：{hit.Answer}\n把握：{hit.Score:P0}（可信线 {cfg.WebSearch.MinScore:P0}）\n\n理由：\n{hit.Note}" + usedNote,
                     wide: true);
                 return;
             }
@@ -453,8 +465,12 @@ public sealed partial class SettingsPage : Page
                 : "没有解析出可用的结果。";
             WebStatusText.Text = $"⚠️ 这次没搜到可信答案（{outcome.ElapsedMs}ms）";
             await ShowDialogAsync("网页搜索测试",
-                $"引擎：{engineName}\n耗时：{outcome.ElapsedMs}ms\n\n这次没搜到可信答案：\n· {detail}\n\n" +
-                "可以换个搜索引擎再试（搜狗 / 360 / 必应 的可用性随网络环境变），或者把可信线调低一点。",
+                $"设定引擎：{engineName}\n耗时：{outcome.ElapsedMs}ms\n\n这次没搜到可信答案：\n· {detail}\n\n" +
+                "说明：网页搜索其实每次搜题都在跑，只是国内这几家搜索引擎会按 IP 限流，" +
+                "同一个出口连着问十几题就可能全被跳去验证页。程序已经会自动换引擎、换手机版入口，" +
+                "并把刚被限流的引擎冷却 10 分钟。\n\n" +
+                "还不行的话：①过几分钟再点这个按钮；②换个搜索引擎；③把可信线调低一点；" +
+                "④装了模型的话，网页搜不到时会自动让模型兜底。",
                 wide: true);
         }
         catch (Exception ex)
@@ -822,8 +838,27 @@ public sealed partial class SettingsPage : Page
         var engine = CurrentOcrEngine();
         UmiPanel.Visibility = engine == "umi" ? Visibility.Visible : Visibility.Collapsed;
         WindowsOcrPanel.Visibility = engine == "windows" ? Visibility.Visible : Visibility.Collapsed;
+        VisionOcrPanel.Visibility = engine == "vision" ? Visibility.Visible : Visibility.Collapsed;
         OllamaOcrPanel.Visibility = engine == "ollama" ? Visibility.Visible : Visibility.Collapsed;
         CustomOcrPanel.Visibility = engine == "custom" ? Visibility.Visible : Visibility.Collapsed;
+        UpdateUmiBundledHint();
+    }
+
+    /// <summary>Umi 面板顶部那句提示：内置引擎 / 需要另外装。</summary>
+    private void UpdateUmiBundledHint()
+    {
+        if (UmiBundledHint is null) return;
+
+        if (UmiOcrEngine.HasBundledEngine)
+        {
+            UmiBundledHint.Text = "✅ 这个版本已经自带离线识别引擎，装好就能用，不用另外下载或安装 Umi-OCR。";
+            UmiBundledHint.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
+            return;
+        }
+
+        UmiBundledHint.Text = "⚠️ 这个版本（标准版）没有自带离线引擎。想看零依赖的离线识别，换「完整版」安装包；" +
+                              "或者装上 Umi-OCR 后在这里指定它的目录；也可以把上面引擎换成「视觉大模型」（联网，什么都不用下载）。";
+        UmiBundledHint.Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
     }
 
     private void FillWindowsLanguages(string? current)
@@ -951,6 +986,93 @@ public sealed partial class SettingsPage : Page
             "\n\n识图请选带 -vl / llava / vision 的模型。");
     }
 
+    // ── 视觉大模型 OCR ─────────────────────────────────────
+
+    /// <summary>把「模型与网络」里配好的服务商填进下拉框。</summary>
+    private void FillVisionProviders(AppConfig cfg, string? pinned)
+    {
+        if (VisionProviderCombo is null) return;
+
+        VisionProviderCombo.Items.Clear();
+        VisionProviderCombo.Items.Add(new ComboBoxItem { Content = "（自动挑一个支持图片的模型）", Tag = string.Empty });
+
+        foreach (var provider in cfg.AiProviders)
+        {
+            var label = string.IsNullOrWhiteSpace(provider.Name) ? provider.ProviderKind : provider.Name;
+            if (provider.VisionCapable) label += " · 支持图片";
+            if (!provider.Enabled) label += "（未启用）";
+
+            VisionProviderCombo.Items.Add(new ComboBoxItem { Content = label, Tag = provider.Id });
+        }
+
+        var index = 0;
+        if (!string.IsNullOrWhiteSpace(pinned))
+        {
+            for (var i = 0; i < VisionProviderCombo.Items.Count; i++)
+            {
+                if (VisionProviderCombo.Items[i] is ComboBoxItem item &&
+                    string.Equals(item.Tag as string, pinned, StringComparison.Ordinal))
+                {
+                    index = i;
+                    break;
+                }
+            }
+        }
+        VisionProviderCombo.SelectedIndex = index;
+    }
+
+    private void OnVisionProviderChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading) return;
+
+        // 换服务商时把模型框清掉，免得留着上一个服务商的模型名
+        if (VisionModelBox is not null) VisionModelBox.Text = string.Empty;
+        UpdateOcrDescribe();
+    }
+
+    /// <summary>取当前选中的服务商（没选就是 null）。</summary>
+    private AiProviderConfig? CurrentVisionProvider()
+    {
+        var id = (VisionProviderCombo?.SelectedItem as ComboBoxItem)?.Tag as string;
+        if (string.IsNullOrWhiteSpace(id)) return null;
+        return AppServices.Current.Config.Config.AiProviders.FirstOrDefault(p => p.Id == id);
+    }
+
+    private async void OnFetchVisionModels(object sender, RoutedEventArgs e)
+    {
+        var provider = CurrentVisionProvider();
+        if (provider is null)
+        {
+            await ShowDialogAsync("还没选服务商",
+                "先在上面选一个服务商（「1 · 模型与网络」里已经配好的那个），再来拉它的模型列表。\n\n" +
+                "如果那个服务商还没加进去，去「1 · 模型与网络 → 添加模型」里配一个，填好接口地址和 Key。");
+            return;
+        }
+
+        HeaderHint.Text = $"正在拉取「{provider.DisplayName}」的模型列表…";
+        var probe = provider.Clone();
+        probe.TimeoutSeconds = Math.Max(probe.TimeoutSeconds, 20);
+
+        var result = await AppServices.Current.ModelCatalog.FetchAsync(probe);
+        if (!result.Ok)
+        {
+            HeaderHint.Text = "拉取失败：" + result.Error;
+            return;
+        }
+
+        var visionModels = result.Models.Where(m => m.VisionCapable).ToList();
+        var pick = visionModels.Count > 0 ? visionModels : result.Models.ToList();
+
+        HeaderHint.Text = $"「{provider.DisplayName}」共 {result.Models.Count} 个模型，其中 {visionModels.Count} 个可能支持图片";
+        if (pick.Count > 0) VisionModelBox.Text = pick[0].Id;
+
+        await ShowDialogAsync("可用模型",
+            (visionModels.Count > 0 ? "可能支持图片的：" : "（没认出哪些支持图片，下面全列出来）") + "\n\n" +
+            string.Join("\n", pick.Take(40).Select(m => "· " + m.Id)) +
+            (pick.Count > 40 ? $"\n… 还有 {pick.Count - 40} 个" : string.Empty) +
+            "\n\n名字里带 vl / vision / 4o / omni 的一般都能看图。");
+    }
+
     private void ApplyOcrSettingsToConfig()    {
         var cfg = AppServices.Current.Config.Config;
         cfg.Ocr.Engine = CurrentOcrEngine();
@@ -959,6 +1081,14 @@ public sealed partial class SettingsPage : Page
         cfg.Ocr.Umi.InstallDirectory = (UmiInstallDir.Text ?? string.Empty).Trim();
         cfg.Ocr.Umi.EngineExePath = (UmiExePath.Text ?? string.Empty).Trim();
         cfg.Ocr.Umi.ConfigPath = (UmiConfigPath.Text ?? string.Empty).Trim();
+
+        cfg.Ocr.Vision ??= new VisionOcrConfig();
+        cfg.Ocr.Vision.ProviderId = (VisionProviderCombo?.SelectedItem as ComboBoxItem)?.Tag as string ?? string.Empty;
+        cfg.Ocr.Vision.Model = (VisionModelBox?.Text ?? string.Empty).Trim();
+        cfg.Ocr.Vision.BaseUrlOverride = (VisionBaseUrl?.Text ?? string.Empty).Trim();
+        cfg.Ocr.Vision.ApiKeyOverride = VisionApiKey?.Password ?? string.Empty;
+        cfg.Ocr.Vision.Prompt = VisionPrompt?.Text ?? string.Empty;
+
         cfg.Ocr.OllamaBaseUrl = (OllamaBaseUrl.Text ?? string.Empty).Trim();
         cfg.Ocr.OllamaModel = (OllamaModelBox.Text ?? string.Empty).Trim();
         cfg.Ocr.Custom.Url = (CustomOcrUrl.Text ?? string.Empty).Trim();

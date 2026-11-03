@@ -1,6 +1,9 @@
 ; 题库工坊 QBank —— Inno Setup 安装脚本
-; 编译：ISCC.exe install\qbank.iss
-; 产物：install\Output\QBank-Setup-<版本>.exe
+; 编译（标准版，不带离线识别引擎）：
+;   ISCC.exe install\qbank.iss
+; 编译（完整版，内置离线识别引擎，体积大 ~240MB）：
+;   ISCC.exe /DBundleOcr=1 install\qbank.iss
+; 产物：install\Output\QBank-Setup-<版本>.exe（完整版是 QBank-Setup-<版本>-Full.exe）
 ;
 ; 安装策略：
 ;   · 按用户安装（PrivilegesRequired=lowest），不弹 UAC，装到 %LOCALAPPDATA%\Programs\QBank
@@ -9,11 +12,26 @@
 
 #define AppName "题库工坊"
 #define AppNameEn "QBank"
-#define AppVersion "1.0.8"
+#define AppVersion "1.0.9"
 #define AppPublisher "Escape-Lin"
 #define AppUrl "https://github.com/fotlim/QBank"
 #define AppExeName "QBank.exe"
 #define BuildDir "..\publish"
+
+; 是否把离线 OCR 引擎（.ocr-engine，由 tools\prepare-ocr-engine.ps1 生成）
+; 一起打进安装包。命令行 /DBundleOcr=1 打开。
+#ifndef BundleOcr
+  #define BundleOcr "0"
+#endif
+#define OcrEngineDir "..\.ocr-engine"
+
+#if BundleOcr == "1"
+  #define EditionSuffix "-Full"
+  #define EditionName "完整版"
+#else
+  #define EditionSuffix ""
+  #define EditionName "标准版"
+#endif
 
 [Setup]
 AppId={{8F3C71A2-5D64-4E1B-9C37-2A6F0B4D8E15}
@@ -43,7 +61,7 @@ PrivilegesRequiredOverridesAllowed=dialog commandline
 
 ; 单实例只读数据放用户目录，装到 Program Files 也能用
 OutputDir=Output
-OutputBaseFilename={#AppNameEn}-Setup-{#AppVersion}
+OutputBaseFilename={#AppNameEn}-Setup-{#AppVersion}{#EditionSuffix}
 SetupIconFile=..\src\QBank.App\Assets\QBank.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 UninstallDisplayName={#AppName}
@@ -72,6 +90,12 @@ Name: "portablemode"; Description: "数据跟程序放一起（便携模式，�
 
 [Files]
 Source: "{#BuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; 完整版：把离线识别引擎（PaddleOCR-json + 简体中文模型）一起装上，
+; 用户装完就能直接识图，不用另外下 Umi-OCR。
+#if BundleOcr == "1"
+Source: "{#OcrEngineDir}\*"; DestDir: "{app}\ocr-engine"; Flags: ignoreversion recursesubdirs createallsubdirs
+#endif
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"

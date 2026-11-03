@@ -112,10 +112,16 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10">
-                <TextBlock Text="搜索结果" Style="{StaticResource PageTitle}" VerticalAlignment="Center" />
-                <TextBlock x:Name="ResultMeta" Style="{StaticResource Subtle}" VerticalAlignment="Center"
-                           TextWrapping="Wrap" MaxWidth="520" />
+            <StackPanel Grid.Row="0" Spacing="2">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <TextBlock Text="搜索结果" Style="{StaticResource PageTitle}" VerticalAlignment="Center" />
+                    <TextBlock x:Name="ResultMeta" Style="{StaticResource Subtle}" VerticalAlignment="Center"
+                               TextWrapping="Wrap" MaxWidth="520" />
+                </StackPanel>
+                <!-- 每个来源这次到底跑没跑、跑成什么样，直接写在这里，
+                     省得用户怀疑「网页搜索根本没被调用」 -->
+                <TextBlock x:Name="SourceStatusText" Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                           Visibility="Collapsed" />
             </StackPanel>
 
             <!-- 最佳答案卡片 -->

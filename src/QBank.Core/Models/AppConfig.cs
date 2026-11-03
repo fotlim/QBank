@@ -376,11 +376,14 @@ public sealed class AiProviderConfig
 
 public sealed class OcrConfig
 {
-    /// <summary>umi（Umi-OCR / PaddleOCR，默认）/ windows（系统内置）/ ollama（视觉模型）/ custom（自定义 HTTP）/ none</summary>
+    /// <summary>umi（Umi-OCR / PaddleOCR，默认）/ windows（系统内置）/ vision（视觉大模型）/ ollama（本机视觉模型）/ custom（自定义 HTTP）/ none</summary>
     public string Engine { get; set; } = "umi";
 
     /// <summary>Umi-OCR 相关设置。</summary>
     public UmiOcrConfig Umi { get; set; } = new();
+
+    /// <summary>视觉大模型设置（走 AI 服务商的 OpenAI 兼容接口，和答题共用一套配置）。</summary>
+    public VisionOcrConfig Vision { get; set; } = new();
 
     /// <summary>Windows OCR 语言，例如 zh-Hans-CN / zh-Hant-TW / en-US。</summary>
     public string WindowsLanguage { get; set; } = "zh-Hans-CN";
@@ -433,6 +436,29 @@ public sealed class CustomOcrConfig
 
     /// <summary>从响应 JSON 中取识别文本的点分路径，例如 data.text / result.0.text。</summary>
     public string ResultPath { get; set; } = "text";
+}
+
+/// <summary>
+/// 视觉大模型识别（读图里的文字）。
+/// 直接复用「模型与网络」里配好的服务商，不用再填一遍 key；
+/// 也能单独指定 base url / 模型，方便接没加进服务商列表的接口。
+/// </summary>
+public sealed class VisionOcrConfig
+{
+    /// <summary>用哪个 AI 服务商（AppConfig.AiProviders 里的 Id）。留空则用下面的自定义接口。</summary>
+    public string ProviderId { get; set; } = string.Empty;
+
+    /// <summary>该服务商下的模型名；留空则用服务商自身的模型。</summary>
+    public string Model { get; set; } = string.Empty;
+
+    /// <summary>直接指定接口地址（优先于 ProviderId），例如 https://api.siliconflow.cn/v1。</summary>
+    public string BaseUrlOverride { get; set; } = string.Empty;
+
+    /// <summary>直接指定 API Key（配合 BaseUrlOverride 用）。</summary>
+    public string ApiKeyOverride { get; set; } = string.Empty;
+
+    /// <summary>识别提示词，留空用内置的那句。</summary>
+    public string Prompt { get; set; } = string.Empty;
 }
 /// <summary>网络出口设置：解决系统代理把请求送去没在跑的本地端口。</summary>
 public sealed class NetworkConfig

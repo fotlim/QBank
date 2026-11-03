@@ -76,6 +76,8 @@ internal static class Program
             await RunAsync("局域网服务端", () => TestLanServerAsync(workDir));
             await RunAsync("OCS 对接口", () => TestOcsBridgeAsync(workDir));
             await RunAsync("OCR 题干切分", TestOcrParseAsync);
+            await RunAsync("OCR 引擎探测与内置引擎", TestOcrEngineDetectionAsync);
+            await RunAsync("OCR 视觉大模型选择", TestVisionOcrSelectionAsync);
             if (args.Contains("--ocr")) await RunAsync("OCR 实机识别（Umi-OCR）", TestRealOcrAsync);
             await RunAsync("搜题总编排", () => TestSearchServiceAsync(workDir));
         }
@@ -839,6 +841,48 @@ internal static class Program
         var weak = WebAnswerMatcher.Guess(unrelated, "今天天气不错，适合出门散步。", cfg);
         Check(weak is null || weak.Score < 0.75, $"无关网页不该给出高把握答案，实际 {weak?.Score:F2}");
 
+        // 手机版 360 的结果块是 <div class="g-card res-list og">（res-list 不在 class 开头），
+        // 桌面版被限流时只能靠它，切不出来网页搜索就等于废的
+        const string mobileHtml = """
+            <html><head><title>水的化学式是什么_360搜索</title></head><body>
+            <div class="g-card res-list og" data-pcurl="https://ai.so.com/search">
+              <a class=alink href="https://m.so.com/jump?u=xx"><h3 class="res-title">水的化学式是什么</h3>
+              <p class="g-main summary">H₂O 水的化学式是H₂O,表示每个水分子由两个氢原子和一个氧原子组成。</p></a>
+            </div>
+            <div class="g-card res-list og" data-pcurl="https://zhidao.baidu.com/q/1">
+              <a class=alink href="https://m.so.com/jump?u=yy"><h3 class="res-title">水 - 百度知道</h3>
+              <p class="g-main summary">水的化学式是 H₂O，由两个氢原子和一个氧原子结合形成。</p></a>
+            </div>
+            </body></html>
+            """;
+        var mobileBlocks = HtmlSlicer.Slice(mobileHtml, WebSearchEngines.So360);
+        Check(mobileBlocks.Count >= 2, $"手机版 360 也应切出至少 2 块，实际 {mobileBlocks.Count}");
+
+        // 手机版搜狗的结果块叫 vrResult
+        const string sogouMobileHtml = """
+            <html><body>
+            <div class="vrResult"><h3 class="vr-tit">水的化学式是什么_搜狗问问</h3><div class="text-layout">水的化学式是 H2O，由两个氢原子和一个氧原子构成。</div></div>
+            <div class="vrResult"><h3 class="vr-tit">水的化学式怎么写 - 作业帮</h3><div class="text-layout">H2O 是水的化学式，常温下为无色无味的液体。</div></div>
+            </body></html>
+            """;
+        var sogouBlocks = HtmlSlicer.Slice(sogouMobileHtml, WebSearchEngines.Sogou);
+        Check(sogouBlocks.Count >= 2, $"手机版搜狗也应切出至少 2 块，实际 {sogouBlocks.Count}");
+
+        // LooksBlocked 必须扫整页：必应的结果区常在第 5 万字符之后，
+        // 以前只扫前 20000 字 → 明明抓到了完整结果却被判成「被反爬拦了」
+        var padding = new string('x', 60000);
+        var lateMarker = "<html><body>" + padding + "<li class=\"b_algo\">结果</li></body></html>";
+        Check(!WebSearchSource.LooksBlocked(lateMarker, WebSearchEngines.Bing),
+            "结果区靠后的必应页面不该被判成被拦");
+        Check(WebSearchSource.LooksBlocked("<html><body>" + padding + "</body></html>", WebSearchEngines.Bing),
+            "整页没有任何结果标记应判成被拦");
+        Check(WebSearchSource.LooksBlocked("<html><body>antispider</body></html>", WebSearchEngines.Sogou),
+            "含 antispider 的页面应判成被拦");
+
+        // 限流冷却：被跳去验证页后，这个引擎短时间内不该再被优先试
+        WebSearchSource.ResetCooldown();
+        Check(!WebSearchSource.InCooldown(WebSearchEngines.So360), "清空后不该有冷却");
+
         return Task.CompletedTask;
     }
 
@@ -1104,6 +1148,144 @@ internal static class Program
         var withType = OcrQuestionParser.Parse("（多选）以下哪些是质数\nA. 2\nB. 3\nC. 4");
         CheckEqual(QuestionType.Multiple, withType.Type, "多选识别");
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 内置引擎探测：随包引擎目录布局、FindPaddleExe 的两种布局、
+    /// 以及「标准版（没有内置引擎）」时报错文案是否说得明白。
+    /// </summary>
+    private static Task TestOcrEngineDetectionAsync()
+    {
+        // ① 随包引擎的目录约定
+        CheckEqual("ocr-engine", UmiOcrEngine.BundledFolderName, "内置引擎目录名");
+        Check(
+            UmiOcrEngine.BundledEngineDirectory.EndsWith(@"\ocr-engine", StringComparison.OrdinalIgnoreCase),
+            "内置目录应位于程序目录下： " + UmiOcrEngine.BundledEngineDirectory);
+        Check(
+            UmiOcrEngine.BundledEngineDirectory.StartsWith(AppContext.BaseDirectory, StringComparison.OrdinalIgnoreCase),
+            "内置目录应该跟着 exe 走");
+
+        // ② FindPaddleExe 认得两种布局：直接指到引擎目录 / Umi-OCR 标准布局
+        var root = Path.Combine(AppContext.BaseDirectory, ".selftest", "engine-" + Guid.NewGuid().ToString("n"));
+        var flat = Path.Combine(root, "flat");
+        Directory.CreateDirectory(flat);
+        File.WriteAllText(Path.Combine(flat, "PaddleOCR-json.exe"), "stub");
+        CheckEqual("flat", UmiOcrEngine.FindPaddleExe(flat) is null ? "flat" : "flat",
+            "直接指到引擎目录时应能认出");
+        Check(UmiOcrEngine.FindPaddleExe(flat) is not null, "直接指到含 exe 的目录应能找到引擎");
+
+        var umiLayout = Path.Combine(root, "umi", "UmiOCR-data", "plugins", "win7_x64_PaddleOCR-json");
+        Directory.CreateDirectory(umiLayout);
+        File.WriteAllText(Path.Combine(umiLayout, "PaddleOCR-json.exe"), "stub");
+        var found = UmiOcrEngine.FindPaddleExe(Path.Combine(root, "umi"));
+        Check(found is not null && found.EndsWith("PaddleOCR-json.exe", StringComparison.OrdinalIgnoreCase),
+            "Umi-OCR 标准布局应能被找到");
+
+        // 不存在的目录别抛异常
+        Check(UmiOcrEngine.FindPaddleExe(Path.Combine(root, "nope")) is null, "不存在的目录应返回 null");
+        Check(UmiOcrEngine.FindPaddleExe(null) is null, "null 应返回 null");
+
+        try { Directory.Delete(root, recursive: true); } catch (Exception) { }
+
+        // ③ 没引擎时的报错要能指路（不是干巴巴一句「找不到」）
+        var service = new OcrService(() => new AppConfig
+        {
+            Ocr = new OcrConfig
+            {
+                Engine = "umi",
+                Umi = new UmiOcrConfig { UseHttp = false, EngineExePath = string.Empty, InstallDirectory = string.Empty },
+            },
+        });
+
+        var describe = service.DescribeCurrent();
+        Check(describe.Contains("Umi-OCR"), "说明文案应提到 Umi-OCR：" + describe);
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 视觉大模型 OCR：确认能挑到「支持图片」的服务商、能挑不到时给出可读的错误，
+    /// 以及 BaseUrlOverride 能直连任意 OpenAI 兼容接口（用本地 mock 验真）。
+    /// </summary>
+    private static async Task TestVisionOcrSelectionAsync()
+    {
+        // ① 服务商筛选：优先「支持图片 + 已启用」
+        var cfg = new AppConfig
+        {
+            Ocr = new OcrConfig { Engine = "vision" },
+            AiProviders = new List<AiProviderConfig>
+            {
+                new() { Id = "text-only", Name = "纯文本", BaseUrl = "http://127.0.0.1:1/v1", Model = "t", Enabled = true, VisionCapable = false },
+                new() { Id = "vision-on", Name = "看图模型", BaseUrl = "http://127.0.0.1:1/v1", Model = "v", Enabled = true, VisionCapable = true },
+                new() { Id = "vision-off", Name = "看图但没启用", BaseUrl = "http://127.0.0.1:1/v1", Model = "v2", Enabled = false, VisionCapable = true },
+            },
+        };
+
+        var service = new OcrService(() => cfg);
+        CheckEqual("vision", OcrEngineKindExtensions.ParseEngine("vision").ToConfigValue(), "vision 引擎枚举");
+        CheckEqual("视觉大模型（联网 API）", OcrEngineKind.Vision.ToChinese(), "vision 中文名");
+        CheckEqual(OcrEngineKind.Vision, OcrEngineKindExtensions.ParseEngine("vlm"), "vlm 别名");
+
+        var describe = service.DescribeCurrent();
+        Check(describe.Contains("看图模型"), "应挑到已启用且支持图片的服务商：" + describe);
+
+        // ② 一个视觉模型都没有时，报错要指路
+        cfg.AiProviders.Clear();
+        cfg.AiProviders.Add(new AiProviderConfig { Id = "x", Name = "纯文本", BaseUrl = "http://127.0.0.1:1/v1", Enabled = true, VisionCapable = false });
+        Check(service.DescribeCurrent().Contains("还没有配支持图片的模型"), "没视觉模型时应提示： " + service.DescribeCurrent());
+
+        var img = MakeQuestionImage();
+        var noProvider = await service.RecognizeAsync(img);
+        Check(!noProvider.Ok, "没有视觉模型时应失败");
+        Check((noProvider.Error ?? string.Empty).Contains("支持图片"),
+            "报错应提示去配支持图片的模型：" + noProvider.Error);
+
+        // ③ BaseUrlOverride 直连：用 mock 冒充一个 OpenAI 兼容的视觉接口
+        using var mock = new MockServer();
+        mock.Map("/v1/chat/completions", (_, body) => (200, "application/json",
+            """{"choices":[{"message":{"role":"assistant","content":"1、中国的首都是哪座城市？\nA. 上海\nB. 北京\nC. 广州"}}],"usage":{"prompt_tokens":10,"completion_tokens":20}}"""));
+
+        var cfgDirect = new AppConfig
+        {
+            Ocr = new OcrConfig
+            {
+                Engine = "vision",
+                Vision = new VisionOcrConfig
+                {
+                    BaseUrlOverride = mock.BaseUrl + "/v1",
+                    ApiKeyOverride = "test-key",
+                    Model = "fake-vl",
+                },
+            },
+            AiProviders = new List<AiProviderConfig>(),
+        };
+
+        var direct = await new OcrService(() => cfgDirect).RecognizeAsync(img);
+        Check(direct.Ok, "BaseUrlOverride 直连应成功：" + direct.Error);
+        Check(direct.Text.Contains("首都"), "应读出题目：" + direct.Text);
+        Check(mock.Requests.Count >= 1, "mock 应收到请求");
+        if (_verbose) Console.WriteLine("       · 直连识别：" + direct.Text.Replace("\n", " / "));
+
+        // 请求体里应带 image_url（视觉接口的关键）
+        var lastBody = mock.Requests[^1].Body;
+        Check(lastBody.Contains("image_url"), "请求体应含 image_url");
+        Check(lastBody.Contains("fake-vl"), "请求体应带模型名");
+    }
+
+    /// <summary>画一张题图（900x300，白底黑字），返回 PNG 字节。</summary>
+    private static byte[] MakeQuestionImage()
+    {
+        using var bmp = new System.Drawing.Bitmap(900, 300);
+        using (var g = System.Drawing.Graphics.FromImage(bmp))
+        {
+            g.Clear(System.Drawing.Color.White);
+            using var font = new System.Drawing.Font("Microsoft YaHei", 26, System.Drawing.FontStyle.Bold);
+            g.DrawString("1、中国的首都是哪座城市?", font, System.Drawing.Brushes.Black, 20, 20);
+            g.DrawString("A. 上海    B. 北京    C. 广州", font, System.Drawing.Brushes.Black, 20, 100);
+        }
+        using var ms = new MemoryStream();
+        bmp.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+        return ms.ToArray();
     }
 
     /// <summary>

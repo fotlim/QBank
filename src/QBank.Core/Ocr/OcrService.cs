@@ -31,6 +31,7 @@ public sealed class OcrService
         {
             OcrEngineKind.Umi => await RecognizeUmiAsync(ocr, imageBytes, ct),
             OcrEngineKind.Windows => await WindowsOcrEngine.RecognizeAsync(imageBytes, ocr.WindowsLanguage, ct),
+            OcrEngineKind.Vision => await RecognizeVisionAsync(ocr, imageBytes, ct),
             OcrEngineKind.Ollama => await RecognizeOllamaAsync(ocr, imageBytes, ct),
             OcrEngineKind.Custom => await RecognizeCustomAsync(ocr.Custom, imageBytes, ct),
             _ => OcrResult.Fail("none", "还没有选择 OCR 引擎，请到「设置 → 图片识别」里挑一个"),
@@ -42,7 +43,13 @@ public sealed class OcrService
     {
         var umi = ocr.Umi ??= new UmiOcrConfig();
 
-        if (umi.UseHttp)
+        // 用的是随程序内置的引擎，且用户没有另外指定 Umi-OCR —— 那就别去试它的 HTTP 服务了，
+        // 反正也没开，白等一轮超时。直接调内置引擎。
+        var usingBundled = UmiOcrEngine.HasBundledEngine
+                           && string.IsNullOrWhiteSpace(umi.EngineExePath)
+                           && string.IsNullOrWhiteSpace(umi.InstallDirectory);
+
+        if (umi.UseHttp && !usingBundled)
         {
             var http = await UmiOcrEngine.RecognizeViaHttpAsync(imageBytes, umi.ApiBaseUrl, umi.Language, ct);
             if (http.Ok && http.Text.Length > 0) return http;
@@ -56,6 +63,7 @@ public sealed class OcrService
                 {
                     var viaEngine = await UmiOcrEngine.RecognizeViaEngineAsync(imageBytes, exe, umi.ConfigPath, null, ct);
                     viaEngine.Warnings.Insert(0, "HTTP 服务没开，已自动改用本地引擎直连");
+
                     if (viaEngine.Ok) return viaEngine;
                     viaEngine.Error = $"{http.Error}；本地引擎也失败：{viaEngine.Error}";
                     return viaEngine;
@@ -68,7 +76,11 @@ public sealed class OcrService
         var exePath = ResolveExe(umi);
         if (exePath is null)
             return OcrResult.Fail(UmiOcrEngine.EngineName,
-                "没有找到 PaddleOCR-json.exe。请在「设置 → 图片识别」里指定 Umi-OCR 目录，或开启 Umi-OCR 的 HTTP 服务");
+                UmiOcrEngine.HasBundledEngine
+                    ? "内置的 OCR 引擎文件不见了，建议重新安装一次「完整版」安装包"
+                    : "没有找到离线 OCR 引擎。装的如果是「标准版」安装包，它不自带引擎 —— " +
+                      "换「完整版」安装包最省事；也可以装 Umi-OCR 后在「设置 → 图片识别」里指定它的目录，" +
+                      "或者把识别引擎换成「视觉大模型」（联网、不用下载任何东西）");
 
         return await UmiOcrEngine.RecognizeViaEngineAsync(imageBytes, exePath, umi.ConfigPath, null, ct);
     }
@@ -99,7 +111,7 @@ public sealed class OcrService
         AiProviderConfig provider;
         if (!string.IsNullOrWhiteSpace(ocr.OllamaProviderId))
         {
-            provider = config.AiProviders.FirstOrDefault(p => p.Id == ocr.OllamaProviderId)
+            provider = config.AiProviders.FirstOrDefault(p => p.Id == ocr.OllamaProviderId)?.Clone()
                        ?? BuildOllamaProvider(ocr);
         }
         else
@@ -112,13 +124,9 @@ public sealed class OcrService
         provider.Temperature = 0;
         provider.MaxTokens = Math.Max(provider.MaxTokens, 1024);
 
-        const string prompt =
-            "请把图片里的所有文字按原来的行序逐行读出来，只输出文字本身，" +
-            "不要翻译、不要总结、不要加任何解释或 Markdown 标记。如果图片里没有文字，就输出空。";
-
         var messages = new List<Ai.AiChatMessage>
         {
-            Ai.AiChatMessage.UserWithImage(prompt, imageBytes, ScreenCapture.DetectMime(imageBytes)),
+            Ai.AiChatMessage.UserWithImage(DefaultVisionPrompt, imageBytes, ScreenCapture.DetectMime(imageBytes)),
         };
 
         var client = new Ai.AiChatClient();
@@ -160,6 +168,117 @@ public sealed class OcrService
         TimeoutSeconds = 120,
         VisionCapable = true,
     };
+
+    /// <summary>识别用的内置提示词（视觉大模型与 Ollama 共用）。</summary>
+    public const string DefaultVisionPrompt =
+        "请把图片里的所有文字按原来的行序逐行读出来，只输出文字本身，" +
+        "不要翻译、不要总结、不要加任何解释或 Markdown 标记。如果图片里没有文字，就输出空。";
+
+    /// <summary>
+    /// 视觉大模型识别：走「模型与网络」里已经配好的服务商（OpenAI 兼容接口传图），
+    /// 不用另填 key；也能用 BaseUrlOverride/ApiKeyOverride 直连任意兼容接口。
+    /// </summary>
+    private async Task<OcrResult> RecognizeVisionAsync(OcrConfig ocr, byte[] imageBytes, CancellationToken ct)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var vision = ocr.Vision ?? new VisionOcrConfig();
+        var config = Config;
+
+        AiProviderConfig? provider = null;
+
+        if (!string.IsNullOrWhiteSpace(vision.BaseUrlOverride))
+        {
+            provider = new AiProviderConfig
+            {
+                Id = "ocr-vision-direct",
+                Name = "视觉大模型（自定义接口）",
+                ProviderKind = "custom",
+                BaseUrl = vision.BaseUrlOverride.Trim(),
+                ApiKey = string.IsNullOrWhiteSpace(vision.ApiKeyOverride) ? string.Empty : vision.ApiKeyOverride.Trim(),
+                Model = string.IsNullOrWhiteSpace(vision.Model) ? "gpt-4o-mini" : vision.Model.Trim(),
+                UseJsonMode = false,
+                Temperature = 0,
+                MaxTokens = 2048,
+                TimeoutSeconds = 120,
+                VisionCapable = true,
+            };
+        }
+        else
+        {
+            var candidates = config.AiProviders ?? new List<AiProviderConfig>();
+
+            if (string.IsNullOrWhiteSpace(vision.ProviderId))
+            {
+                // 自动挑：优先「支持图片 + 已启用」；退一步挑「支持图片」。
+                // 绝不去挑一个明确不支持图片的模型 —— 那样请求发出去也是白报错。
+                provider = candidates.FirstOrDefault(p => p.VisionCapable && p.Enabled)
+                           ?? candidates.FirstOrDefault(p => p.VisionCapable);
+
+                if (provider is null)
+                {
+                    return OcrResult.Fail(OcrEngineKind.Vision.ToConfigValue(),
+                        "还没有可用的视觉模型（没有哪个服务商标了「支持图片」）。" +
+                        "请到「设置 → 1 · 模型与网络」里配一个支持图片的模型" +
+                        "（比如硅基流动的 Qwen/Qwen2.5-VL-72B-Instruct、百炼的 qwen-vl-max、OpenAI 的 gpt-4o-mini），" +
+                        "再回这里选它；也可以直接在上面填接口地址，不依赖服务商列表");
+                }
+            }
+            else
+            {
+                // 用户明确选了一个服务商就尊重它，只提醒不拦
+                provider = candidates.FirstOrDefault(p => p.Id == vision.ProviderId);
+
+                if (provider is null)
+                {
+                    return OcrResult.Fail(OcrEngineKind.Vision.ToConfigValue(),
+                        "选中的视觉模型服务商已经不在列表里了（可能被删了），请回到「设置 → 图片识别」重新选一个");
+                }
+            }
+
+            provider = provider.Clone();
+            provider.UseJsonMode = false;
+            provider.Temperature = 0;
+            provider.MaxTokens = Math.Max(provider.MaxTokens, 2048);
+            provider.VisionCapable = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(vision.Model) && string.IsNullOrWhiteSpace(vision.BaseUrlOverride))
+            provider.Model = vision.Model.Trim();
+
+        var prompt = string.IsNullOrWhiteSpace(vision.Prompt) ? DefaultVisionPrompt : vision.Prompt!.Trim();
+
+        var messages = new List<Ai.AiChatMessage>
+        {
+            Ai.AiChatMessage.UserWithImage(prompt, imageBytes, ScreenCapture.DetectMime(imageBytes)),
+        };
+
+        var client = new Ai.AiChatClient();
+        var result = await client.CompleteAsync(provider, messages, jsonMode: false, ct);
+
+        stopwatch.Stop();
+
+        if (!result.Ok)
+        {
+            return OcrResult.Fail(OcrEngineKind.Vision.ToConfigValue(),
+                $"视觉模型「{provider.DisplayName} / {provider.Model}」调用失败：{result.Error}");
+        }
+
+        var text = (result.Content ?? string.Empty).Trim().Replace("```", string.Empty).Trim();
+
+        var ocrResult = new OcrResult
+        {
+            Ok = true,
+            Engine = OcrEngineKind.Vision.ToConfigValue(),
+            Text = text,
+            Confidence = text.Length > 0 ? 0.75 : 0,
+            ElapsedMs = stopwatch.ElapsedMilliseconds,
+            Warnings = text.Length == 0 ? new List<string> { "视觉模型没有读出文字" } : new List<string>(),
+        };
+
+        if (!string.IsNullOrWhiteSpace(result.Note)) ocrResult.Warnings.Add(result.Note!);
+
+        return ocrResult;
+    }
 
     /// <summary>自定义 HTTP OCR：请求体模板里替换 {{image_base64}} / {{mime}}，再按点分路径取结果。</summary>
     private async Task<OcrResult> RecognizeCustomAsync(CustomOcrConfig custom, byte[] imageBytes, CancellationToken ct)
@@ -316,18 +435,56 @@ public sealed class OcrService
         {
             OcrEngineKind.Umi => DescribeUmi(ocr),
             OcrEngineKind.Windows => $"Windows 内置 OCR（语言 {ocr.WindowsLanguage}）",
+            OcrEngineKind.Vision => DescribeVision(ocr),
             OcrEngineKind.Ollama => $"Ollama 视觉模型（{ocr.OllamaModel} @ {ocr.OllamaBaseUrl}）",
             OcrEngineKind.Custom => string.IsNullOrWhiteSpace(ocr.Custom?.Url) ? "自定义接口（未配置地址）" : $"自定义接口（{ocr.Custom!.Url}）",
             _ => "未启用",
         };
     }
 
+    private string DescribeVision(OcrConfig ocr)
+    {
+        var vision = ocr.Vision ?? new VisionOcrConfig();
+
+        if (!string.IsNullOrWhiteSpace(vision.BaseUrlOverride))
+        {
+            var model = string.IsNullOrWhiteSpace(vision.Model) ? "gpt-4o-mini" : vision.Model;
+            return $"视觉大模型（自定义接口 {vision.BaseUrlOverride} · {model}）";
+        }
+
+        var providers = Config.AiProviders ?? new List<AiProviderConfig>();
+        var provider = string.IsNullOrWhiteSpace(vision.ProviderId)
+            ? providers.FirstOrDefault(p => p.VisionCapable && p.Enabled) ?? providers.FirstOrDefault(p => p.VisionCapable)
+            : providers.FirstOrDefault(p => p.Id == vision.ProviderId);
+
+        if (provider is null) return "视觉大模型（还没有配支持图片的模型）";
+
+        var name = string.IsNullOrWhiteSpace(vision.Model) ? provider.Model : vision.Model;
+        return $"视觉大模型（{provider.DisplayName} · {name}）";
+    }
+
     private string DescribeUmi(OcrConfig ocr)
     {
         var umi = ocr.Umi ?? new UmiOcrConfig();
         var exe = ResolveExe(umi);
+
+        if (exe is null)
+        {
+            return UmiOcrEngine.HasBundledEngine
+                ? "Umi-OCR · 内置引擎（文件异常）"
+                : "Umi-OCR · 没找到引擎（标准版不自带，或本机没装 Umi-OCR）";
+        }
+
+        var inner = UmiOcrEngine.EngineDirectory(exe) ?? string.Empty;
+        var bundled = string.Equals(
+            Path.GetFullPath(inner).TrimEnd('\\'),
+            Path.GetFullPath(UmiOcrEngine.BundledEngineDirectory).TrimEnd('\\'),
+            StringComparison.OrdinalIgnoreCase);
+
+        // 内置引擎没有 Umi-OCR 主程序，HTTP 那套必然连不上，所以别在状态里写 HTTP 地址
+        if (bundled) return "Umi-OCR · 内置引擎（不用另装，本机直连）";
+
         var mode = umi.UseHttp ? $"HTTP {UmiOcrEngine.NormalizeBase(umi.ApiBaseUrl)}" : "直连引擎";
-        var exeText = exe is null ? "未找到引擎文件" : Path.GetFileName(exe);
-        return $"Umi-OCR · {mode} · {exeText}";
+        return $"Umi-OCR · {mode} · {Path.GetFileName(exe)}";
     }
 }

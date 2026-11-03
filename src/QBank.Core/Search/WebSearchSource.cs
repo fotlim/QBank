@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Text;
@@ -63,21 +64,53 @@ public static class WebSearchEngines
         _ => "必应",
     };
 
-    /// <summary>把查询词拼成搜索地址；自定义模板用 {q} 当占位符。</summary>
+    /// <summary>
+    /// 把查询词拼成搜索地址；自定义模板用 {q} 当占位符。
+    /// 这是「首选地址」；实际抓取时按 <see cref="BuildUrls"/> 依次试。
+    /// </summary>
     public static string BuildUrl(string? engine, string query, string? customTemplate = null)
+        => BuildUrls(engine, query, customTemplate)[0];
+
+    /// <summary>
+    /// 一个引擎的可抓地址，按顺序试。
+    /// 桌面版入口经常被限流（360 会 302 到 qcaptcha、搜狗会 302 到 antispider），
+    /// 但**手机版入口往往还能用**，所以每个引擎都带一条手机版地址兜底。
+    /// </summary>
+    public static string[] BuildUrls(string? engine, string query, string? customTemplate = null)
     {
         var q = Uri.EscapeDataString(query ?? string.Empty);
         var e = (engine ?? Default).ToLowerInvariant();
         return e switch
         {
-            So360 => $"https://www.so.com/s?q={q}",
-            Sogou => $"https://www.sogou.com/web?query={q}",
-            Baidu => $"https://www.baidu.com/s?wd={q}&ie=utf-8",
+            So360 => new[]
+            {
+                $"https://www.so.com/s?q={q}",
+                $"https://m.so.com/s?q={q}",
+                $"https://m.so.com/s?q={q}&src=srp",
+            },
+            Sogou => new[]
+            {
+                $"https://www.sogou.com/web?query={q}",
+                $"https://m.sogou.com/web/searchList.jsp?keyword={q}",
+            },
+            Baidu => new[]
+            {
+                $"https://www.baidu.com/s?wd={q}&ie=utf-8",
+                $"https://m.baidu.com/s?wd={q}",
+            },
             Custom when !string.IsNullOrWhiteSpace(customTemplate) =>
-                customTemplate!.Contains("{q}", StringComparison.OrdinalIgnoreCase)
-                    ? customTemplate.Replace("{q}", q, StringComparison.OrdinalIgnoreCase)
-                    : customTemplate + q,
-            _ => $"https://www.bing.com/search?q={q}&setlang=zh-CN&cc=CN",
+                new[]
+                {
+                    customTemplate!.Contains("{q}", StringComparison.OrdinalIgnoreCase)
+                        ? customTemplate.Replace("{q}", q, StringComparison.OrdinalIgnoreCase)
+                        : customTemplate + q,
+                },
+            // 必应：www 会 302 到 cn，直接打 cn 少跳一次
+            _ => new[]
+            {
+                $"https://cn.bing.com/search?q={q}",
+                $"https://www.bing.com/search?q={q}&setlang=zh-CN&cc=CN",
+            },
         };
     }
 
@@ -197,12 +230,23 @@ public static class HtmlSlicer
 
     private static string[] ContainerPatterns(string? engine) => (engine ?? WebSearchEngines.Default).ToLowerInvariant() switch
     {
-        WebSearchEngines.Baidu => new[] { "<div[^>]*class=\"[^\"]*result[^\"]*c-container", "<div[^>]*class=\"[^\"]*c-container" },
-        WebSearchEngines.Sogou => new[] { "<div[^>]*class=\"[^\"]*vrwrap", "<div[^>]*class=\"[^\"]*rb\"" },
+        WebSearchEngines.Baidu => new[]
+        {
+            "<div[^>]*class=\"[^\"]*result[^\"]*c-container",
+            "<div[^>]*class=\"[^\"]*c-container",
+        },
+        WebSearchEngines.Sogou => new[]
+        {
+            // 手机版搜狗的结果块叫 vrResult（桌面版是 vrwrap）
+            "<div[^>]*class=\"[^\"]*vrwrap",
+            "<div[^>]*class=\"[^\"]*vrResult",
+            "<div[^>]*class=\"[^\"]*rb\"",
+        },
         WebSearchEngines.So360 => new[]
         {
             "<li[^>]*class=\"[^\"]*res-list",
             "<li[^>]*class=\"[^\"]*res-item",
+            // 手机版：<div class="g-card res-list og">，注意 class 里 res-list 不一定打头
             "<div[^>]*class=\"[^\"]*res-list",
         },
         _ => new[] { "<li[^>]*class=\"[^\"]*b_algo", "<li[^>]*class=\"[^\"]*b_ans" },
@@ -676,28 +720,51 @@ public sealed class WebSearchSource
         if (primary != WebSearchEngines.Custom)
             candidates.AddRange(WebSearchEngines.Fallbacks(primary));
 
-        foreach (var engine in candidates)
+        // 刚被限流过的引擎排到后面：它这会儿大概率还是验证码页，
+        // 先试它只会白等一轮超时，而用户要的是答案，不是尊重偏好。
+        var ordered = candidates
+            .OrderBy(e => InCooldown(e) ? 1 : 0)
+            .ThenBy(e => candidates.IndexOf(e))
+            .ToList();
+
+        foreach (var engine in ordered)
         {
             ct.ThrowIfCancellationRequested();
-            var url = WebSearchEngines.BuildUrl(engine, query, engine == primary ? cfg.CustomUrlTemplate : null);
-            lastUrl = url;
+
+            // 同一个引擎可能有好几条地址（桌面版 + 手机版）：桌面版被限流时手机版常常还能用。
+            // 但冷却中的引擎只试第一条 —— 别为了一个已知不通的站把整体拖到十几秒。
+            var urls = WebSearchEngines.BuildUrls(engine, query, engine == primary ? cfg.CustomUrlTemplate : null);
+            if (InCooldown(engine) && urls.Length > 1) urls = urls[..1];
             tried.Add(engine);
 
-            var attempt = await TryFetchAsync(url, engine, cfg, ct).ConfigureAwait(false);
-            if (attempt.Blocks is null)
+            string? engineProblem = null;
+            foreach (var url in urls)
             {
-                problems.Add(attempt.Problem ?? $"{WebSearchEngines.DisplayName(engine)}：抓取失败");
-                continue;
+                ct.ThrowIfCancellationRequested();
+                lastUrl = url;
+
+                var attempt = await TryFetchAsync(url, engine, cfg, ct).ConfigureAwait(false);
+                if (attempt.Blocks is null)
+                {
+                    // 每个引擎只留第一条问题，别再往提示里堆「桌面版失败；curl 也失败；手机版失败…」
+                    engineProblem ??= attempt.Problem ?? $"{WebSearchEngines.DisplayName(engine)}：抓取失败";
+
+                    // 被限流/验证码挡住的引擎记一笔冷却，这一阵子就别再优先试它了
+                    if (LooksRateLimited(engineProblem)) MarkCooldown(engine);
+                    continue;
+                }
+
+                var blocks = attempt.Blocks;
+                if (blocks.Count > cfg.MaxResults) blocks = blocks.Take(Math.Max(cfg.MaxResults, 1)).ToList();
+
+                var notice = tried.Count > 1
+                    ? $"默认引擎抓不到，改用{WebSearchEngines.DisplayName(engine)}（{string.Join("；", problems)}）"
+                    : attempt.Note;
+
+                return new WebFetchResult { Blocks = blocks, Url = url, Engine = engine, Notice = notice };
             }
 
-            var blocks = attempt.Blocks;
-            if (blocks.Count > cfg.MaxResults) blocks = blocks.Take(Math.Max(cfg.MaxResults, 1)).ToList();
-
-            var notice = tried.Count > 1
-                ? $"默认引擎抓不到，改用{WebSearchEngines.DisplayName(engine)}（{string.Join("；", problems)}）"
-                : attempt.Note;
-
-            return new WebFetchResult { Blocks = blocks, Url = url, Engine = engine, Notice = notice };
+            if (engineProblem is not null) problems.Add(engineProblem);
         }
 
         return new WebFetchResult
@@ -707,6 +774,29 @@ public sealed class WebSearchSource
             Engine = primary,
         };
     }
+
+    /// <summary>引擎被限流后的冷却时间：这段时间内不再优先试它。</summary>
+    private static readonly TimeSpan CooldownLength = TimeSpan.FromMinutes(10);
+
+    private static readonly ConcurrentDictionary<string, DateTime> CooldownUntil =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>这个引擎是不是刚被限流过。</summary>
+    public static bool InCooldown(string engine) =>
+        CooldownUntil.TryGetValue(engine, out var until) && DateTime.UtcNow < until;
+
+    private static void MarkCooldown(string engine) =>
+        CooldownUntil[engine] = DateTime.UtcNow + CooldownLength;
+
+    /// <summary>清掉冷却（设置页「重新试一次」时用）。</summary>
+    public static void ResetCooldown() => CooldownUntil.Clear();
+
+    /// <summary>这些说法基本就是「被限流 / 撞验证码」。</summary>
+    private static bool LooksRateLimited(string problem) =>
+        problem.Contains("验证页", StringComparison.Ordinal) ||
+        problem.Contains("反爬", StringComparison.Ordinal) ||
+        problem.Contains("验证码", StringComparison.Ordinal) ||
+        problem.Contains("限流", StringComparison.Ordinal);
 
     /// <summary>一个引擎的一次抓取：先用 HttpClient，TLS 谈崩了就用系统自带的 curl.exe 再试一遍。</summary>
     private async Task<(List<WebSearchBlock>? Blocks, string? Problem, string? Note)> TryFetchAsync(
@@ -891,28 +981,29 @@ public sealed class WebSearchSource
         }
     }
 
-    /// <summary>被反爬拦下来的页面长什么样：安全验证页、验证码页、空壳页。</summary>
-    private static bool LooksBlocked(string? html, string? engine)
+    /// <summary>被反爬拦下来的页面长什么样：安全验证页、验证码页、空壳页。公开是为了能离线自测。</summary>
+    public static bool LooksBlocked(string? html, string? engine)
     {
         if (string.IsNullOrWhiteSpace(html)) return true;
-        var t = html.Length > 20000 ? html[..20000] : html;
-
-        if (t.Contains("antispider", StringComparison.OrdinalIgnoreCase)) return true;
-        if (t.Contains("百度安全验证") || t.Contains("网络不给力，请稍后重试")) return true;
-        if (t.Contains("请输入验证码") || t.Contains("人机验证") || t.Contains("访问过于频繁")) return true;
-        if (t.Contains("unusual traffic", StringComparison.OrdinalIgnoreCase)) return true;
 
         // 整个页面小得可怜，基本就是一张提示页
         if (html.Length < 4000) return true;
 
+        if (html.Contains("antispider", StringComparison.OrdinalIgnoreCase)) return true;
+        if (html.Contains("百度安全验证") || html.Contains("网络不给力，请稍后重试")) return true;
+        if (html.Contains("请输入验证码") || html.Contains("人机验证") || html.Contains("访问过于频繁")) return true;
+        if (html.Contains("unusual traffic", StringComparison.OrdinalIgnoreCase)) return true;
+
+        // 注意：**必须扫整页**。以前只扫前 20000 字符，结果必应那种结果区在第 5 万多字符
+        // 的页面永远被判成「被反爬拦了」—— 明明抓到了完整结果却没解析，网页搜索就等于没用。
         var markers = engine?.ToLowerInvariant() switch
         {
-            WebSearchEngines.So360 => new[] { "res-list", "res-title" },
-            WebSearchEngines.Sogou => new[] { "vrwrap", "rb\"", "results" },
+            WebSearchEngines.So360 => new[] { "res-list", "res-title", "g-card" },
+            WebSearchEngines.Sogou => new[] { "vrwrap", "vrResult", "vr-tit", "rb\"" },
             WebSearchEngines.Baidu => new[] { "c-container", "result" },
-            _ => new[] { "b_algo", "b_results" },
+            _ => new[] { "b_algo", "b_results", "b_ans" },
         };
-        return markers is not null && !markers.Any(m => t.Contains(m, StringComparison.OrdinalIgnoreCase));
+        return markers is not null && !markers.Any(m => html.Contains(m, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>调试用：直接取搜索引擎返回的原始 HTML（排错时看反爬拦没拦）。</summary>

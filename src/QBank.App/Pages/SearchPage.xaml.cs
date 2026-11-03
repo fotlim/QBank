@@ -237,6 +237,48 @@ public sealed partial class SearchPage : Page
         var notices = response.Outcomes.SelectMany(o => o.Notices).Distinct().ToList();
         if (notices.Count > 0)
             AppServices.Current.Log("搜题提示：" + string.Join(" | ", notices));
+
+        RenderSourceStatus(response);
+    }
+
+    /// <summary>
+    /// 把「每个来源这次到底跑了没、结果如何」摊开写一行。
+    /// 用户看不到这条就会怀疑网页搜索没被调用 —— 实际上它每次都跑了，只是常常被搜索引擎限流。
+    /// </summary>
+    private void RenderSourceStatus(SearchResponse response)
+    {
+        if (response.Outcomes.Count == 0)
+        {
+            SourceStatusText.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var parts = response.Outcomes
+            .Where(o => o.Kind != SourceKind.Cache)
+            .OrderBy(o => o.Kind)
+            .Select(o =>
+            {
+                var name = o.SourceName;
+                if (!o.Ok) return $"{name} ✗ {(string.IsNullOrWhiteSpace(o.Error) ? "没找到" : Shorten(o.Error))}";
+                var hits = o.Hits.Count;
+                return hits > 0 ? $"{name} ✓ {hits} 条（{o.ElapsedMs}ms）" : $"{name} ✓ 没命中";
+            })
+            .ToList();
+
+        if (parts.Count == 0)
+        {
+            SourceStatusText.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        SourceStatusText.Text = "本次来源：" + string.Join(" · ", parts);
+        SourceStatusText.Visibility = Visibility.Visible;
+
+        static string Shorten(string text)
+        {
+            var one = text.Replace("\r", " ").Replace("\n", " ");
+            return one.Length <= 90 ? one : one[..88] + "…";
+        }
     }
 
     private void OnCancel(object sender, RoutedEventArgs e) => _cts?.Cancel();

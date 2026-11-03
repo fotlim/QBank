@@ -268,6 +268,7 @@ public sealed class ConfigStore
         cfg.WebSearch ??= new WebSearchConfig();
         cfg.AutoTag ??= new AutoTagConfig();
         cfg.Ocr.Umi ??= new UmiOcrConfig();
+        cfg.Ocr.Vision ??= new VisionOcrConfig();
         cfg.Ocr.Custom ??= new CustomOcrConfig();
         cfg.LocalBank.AutoCacheKinds ??= new List<string> { "ai", "lan" };
 

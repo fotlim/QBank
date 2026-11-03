@@ -27,3 +27,10 @@ tools/shots/
 .selftest/
 tools/probe-*.cs
 tools/raw.html
+
+# 内置离线 OCR 引擎（tools\prepare-ocr-engine.ps1 生成，242MB，不进版本库；
+# 打完整版安装包时由 /DBundleOcr=1 现取现用）
+.ocr-engine/
+
+# 网页搜索排错时抓下来的页面
+tools/raw-*.html

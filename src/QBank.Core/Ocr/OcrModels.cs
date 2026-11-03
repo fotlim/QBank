@@ -9,6 +9,7 @@ public enum OcrEngineKind
     None,
     Umi,
     Windows,
+    Vision,
     Ollama,
     Custom,
 }
@@ -141,6 +142,7 @@ public static class OcrEngineKindExtensions
     {
         "umi" or "umiocr" or "umi-ocr" or "paddle" or "paddleocr" or "umi-ocr(默认)" => OcrEngineKind.Umi,
         "windows" or "win" or "系统" => OcrEngineKind.Windows,
+        "vision" or "vlm" or "gpt4v" or "视觉大模型" => OcrEngineKind.Vision,
         "ollama" or "local" or "本地模型" => OcrEngineKind.Ollama,
         "custom" or "http" or "自定义" => OcrEngineKind.Custom,
         _ => OcrEngineKind.None,
@@ -150,6 +152,7 @@ public static class OcrEngineKindExtensions
     {
         OcrEngineKind.Umi => "umi",
         OcrEngineKind.Windows => "windows",
+        OcrEngineKind.Vision => "vision",
         OcrEngineKind.Ollama => "ollama",
         OcrEngineKind.Custom => "custom",
         _ => "none",
@@ -159,6 +162,7 @@ public static class OcrEngineKindExtensions
     {
         OcrEngineKind.Umi => "Umi-OCR（PaddleOCR 离线）",
         OcrEngineKind.Windows => "Windows 内置 OCR",
+        OcrEngineKind.Vision => "视觉大模型（联网 API）",
         OcrEngineKind.Ollama => "Ollama 本地视觉模型",
         OcrEngineKind.Custom => "自定义 OCR 接口",
         _ => "未启用",

@@ -18,6 +18,17 @@ public static class UmiOcrEngine
     /// <summary>Umi-OCR 默认 HTTP 端口（可在其全局设置里改）。</summary>
     public const int DefaultHttpPort = 1224;
 
+    /// <summary>随程序一起发布的引擎目录名（完整版安装包里有，标准版没有）。</summary>
+    public const string BundledFolderName = "ocr-engine";
+
+    /// <summary>程序自带的引擎目录：&lt;exe 目录&gt;\ocr-engine。</summary>
+    public static string BundledEngineDirectory =>
+        Path.Combine(AppContext.BaseDirectory, BundledFolderName);
+
+    /// <summary>随包引擎是否就位。</summary>
+    public static bool HasBundledEngine =>
+        File.Exists(Path.Combine(BundledEngineDirectory, "PaddleOCR-json.exe"));
+
     /// <summary>常见安装位置。</summary>
     public static IEnumerable<string> CandidateRoots()
     {
@@ -53,6 +64,11 @@ public static class UmiOcrEngine
     {
         if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) return null;
 
+        // ① 用户直接指到引擎目录本身（里面就有 exe + models）
+        var flat = Path.Combine(root, "PaddleOCR-json.exe");
+        if (File.Exists(flat)) return flat;
+
+        // ② Umi-OCR 的标准布局：<根>\UmiOCR-data\plugins\<插件目录>\PaddleOCR-json.exe
         var direct = Path.Combine(root, "UmiOCR-data", "plugins");
         if (!Directory.Exists(direct)) return null;
 
@@ -75,9 +91,15 @@ public static class UmiOcrEngine
         return null;
     }
 
-    /// <summary>自动探测本机的 PaddleOCR-json.exe，找不到返回 null。</summary>
+    /// <summary>
+    /// 自动找 PaddleOCR-json.exe：先看随程序内置的，再找本机装的 Umi-OCR。
+    /// 找不到返回 null。
+    /// </summary>
     public static string? DetectPaddleExe()
     {
+        // 内置引擎最优先：它一定和程序版本配套，用户不用装任何东西
+        if (HasBundledEngine) return Path.Combine(BundledEngineDirectory, "PaddleOCR-json.exe");
+
         foreach (var root in CandidateRoots())
         {
             var exe = FindPaddleExe(root);
