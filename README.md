@@ -40,7 +40,7 @@ QBank 把这些合成一个窗口：**输入题干（或者直接截图）→ �
 | | 标准版 | 完整版 |
 | --- | --- | --- |
 | 安装包 | `QBank-Setup-1.0.9.exe`（约 63MB） | `QBank-Setup-1.0.9-Full.exe`（约 180MB） |
-| 绿色版 | `QBank-1.0.9-portable.zip`（约 90MB） | 解压后把 `.ocr-engine` 文件夹拷到 `ocr-engine` 即可 |
+| 绿色版 | `QBank-1.0.9-portable.zip`（约 90MB） | `QBank-1.0.9-portable-Full.zip`（约 174MB，已含 `ocr-engine\`） |
 | 离线识图（不联网、不花钱） | ❌ 要另装 [Umi-OCR](https://github.com/hiroi-sora/Umi-OCR)，或在设置里指到已有的 Umi-OCR 目录 | ✅ **装完就能用**，引擎和简体中文模型已内置在 `ocr-engine\` 目录 |
 | 视觉大模型识图（联网） | ✅ 支持 | ✅ 支持 |
 | 其它功能 | 完全一样 | 完全一样 |
