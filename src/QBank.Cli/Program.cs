@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text;
 using QBank.Core;
 using QBank.Core.Ai;
@@ -33,6 +33,19 @@ internal static class Program
         if (onlyIndex >= 0 && onlyIndex + 1 < args.Length) _only = args[onlyIndex + 1];
 
         Console.OutputEncoding = Encoding.UTF8;
+
+        // 网页搜索探针：QBank.Cli --web "<题干>" [--options "..."] [--engine so360|sogou|bing|baidu] [--tag]
+        //                [--dump <原始HTML落盘>] [--html <直接解析本地HTML>]
+        if (args.Contains("--web"))
+        {
+            return await RunWebProbeAsync(
+                OptionValue(args, "--web") ?? string.Empty,
+                OptionValue(args, "--options") ?? string.Empty,
+                OptionValue(args, "--engine"),
+                args.Contains("--tag"),
+                args);
+        }
+
         Console.WriteLine("QBank 自测开始\n");
 
         // 沙箱环境下 %TEMP% 可能不可写，统一放在程序目录下的 .selftest 里
@@ -54,8 +67,11 @@ internal static class Program
             await RunAsync("网络出口（死代理绕行）", TestNetworkConfigAsync);
             await RunAsync("设置备份与恢复", () => TestSettingsBackupAsync(workDir));
             await RunAsync("本地题库增删查", () => TestLocalBankAsync(workDir));
+            await RunAsync("题库标签与分页", () => TestBankTaggingAsync(workDir));
             await RunAsync("题库导入导出", () => TestImportExportAsync(workDir));
             await RunAsync("历史记录", () => TestHistoryAsync(workDir));
+            await RunAsync("自动标签（词表）", () => TestAutoTagAsync(workDir));
+            await RunAsync("网页答案解析（离线）", TestWebParsingAsync);
             await RunAsync("局域网服务端", () => TestLanServerAsync(workDir));
             await RunAsync("OCS 对接口", () => TestOcsBridgeAsync(workDir));
             await RunAsync("OCR 题干切分", TestOcrParseAsync);
@@ -571,6 +587,200 @@ internal static class Program
 
         Check(bank.Delete(id), "删除应成功");
         CheckEqual(0, bank.Count(), "删除后应为 0 条");
+        return Task.CompletedTask;
+    }
+
+    private static Task TestBankTaggingAsync(string workDir)
+    {
+        var bank = new LocalBank(Path.Combine(workDir, "tagging.db"));
+
+        var ids = new List<long>();
+        for (var i = 1; i <= 6; i++)
+        {
+            ids.Add(bank.Upsert(new Question
+            {
+                Title = $"标签自测题目第 {i} 题",
+                Options = "A. 甲\nB. 乙",
+                Answer = "A",
+                Type = QuestionType.Single,
+                Source = "自测",
+            }));
+        }
+        CheckEqual(6, bank.Count(), "写入 6 道题");
+
+        // 分页：offset/limit 应能切出不同页
+        var page1 = bank.Query(null, null, 0, 3, "id");
+        var page2 = bank.Query(null, null, 3, 3, "id");
+        CheckEqual(3, page1.Count, "第一页 3 条");
+        CheckEqual(3, page2.Count, "第二页 3 条");
+        Check(page1[0].Id != page2[0].Id, "两页不应是同一批题");
+
+        // 收藏 = 特殊标签
+        CheckEqual(0, bank.Count(null, null, LocalBank.FavoriteTag), "初始收藏数应为 0");
+        var favorites = new List<Question>();
+        foreach (var id in ids.Take(2))
+        {
+            var question = bank.GetById(id)!;
+            question.Tags = QBank.Core.Ai.TagList.Join(QBank.Core.Ai.TagList.Parse(question.Tags).Append(LocalBank.FavoriteTag));
+            favorites.Add(question);
+        }
+        CheckEqual(2, bank.SaveTags(favorites), "保存 2 道收藏");
+        CheckEqual(2, bank.Count(null, null, LocalBank.FavoriteTag), "按收藏标签筛应为 2");
+        CheckEqual(2, bank.QueryByTag(LocalBank.FavoriteTag).Count, "QueryByTag 收藏应为 2");
+        CheckEqual(2, bank.Query(null, null, 0, 10, "id", LocalBank.FavoriteTag).Count, "Query 带标签筛应为 2");
+
+        // 标签筛选是整词匹配：「收藏」不该命中「★收藏」
+        CheckEqual(0, bank.Count(null, null, "收藏"), "「收藏」不该匹配「★收藏」");
+
+        var tagStats = bank.TagStats();
+        Check(tagStats.Any(t => t.Tag == LocalBank.FavoriteTag && t.Count == 2), "标签统计应含收藏 2 条");
+
+        CheckEqual(4, bank.QueryUntagged(100).Count, "未打标签的题应为 4");
+
+        // 编辑
+        var edit = bank.GetById(ids[2])!;
+        edit.Answer = "B";
+        edit.Tags = "数学 错题";
+        Check(bank.Update(edit), "编辑应成功");
+        var reloaded = bank.GetById(ids[2])!;
+        CheckEqual("B", reloaded.Answer, "编辑后的答案");
+        CheckEqual("数学 错题", reloaded.Tags, "编辑后的标签");
+
+        // 改成和另一道题一样的题干会撞指纹 -> Update 返回 false
+        var duplicate = bank.GetById(ids[3])!;
+        duplicate.Title = reloaded.Title;
+        duplicate.Type = reloaded.Type;
+        Check(!bank.Update(duplicate), "题干撞车时 Update 应返回 false");
+
+        // 增量导出：改动之后只导出一条
+        var since = DateTimeOffset.Now;
+        Thread.Sleep(30);
+        var changed = bank.GetById(ids[4])!;
+        changed.Answer = "C";
+        Check(bank.Update(changed), "增量前先改一道题");
+
+        CheckEqual(1, bank.CountUpdatedSince(since), "自 since 之后应只有 1 道题被改");
+        var incremental = bank.ExportJson(since, 0);
+        Check(incremental.Contains("\"incremental\": true"), "增量导出的信封应标 incremental");
+        Check(incremental.Contains(changed.Title), "增量导出应含刚改的题");
+        Check(!incremental.Contains("标签自测题目第 1 题"), "增量导出不该含没动过的题");
+
+        var full = bank.ExportJson();
+        Check(full.Contains("标签自测题目第 1 题"), "全量导出应含所有题");
+
+        return Task.CompletedTask;
+    }
+
+    private static async Task TestAutoTagAsync(string workDir)
+    {
+        // 词表：数学题应打出学科 + 题型
+        var math = new Question
+        {
+            Title = "已知函数 f(x)=x²+2x，求它的最小值。",
+            Options = "A. 0\nB. -1\nC. 1",
+            Type = QuestionType.Single,
+        };
+        var suggested = QuestionTagRules.Suggest(math, 4);
+        Check(suggested.Count > 0, "词表应至少给一个标签");
+        Check(suggested.Contains("数学"), $"数学题应打上「数学」，实际：{string.Join("/", suggested)}");
+        Check(suggested.Contains("单选"), $"应带上题型标签，实际：{string.Join("/", suggested)}");
+
+        var judge = new Question { Title = "地球是太阳系中体积最大的行星。", Options = "A. 对\nB. 错", Type = QuestionType.Judgement };
+        var judgeTags = QuestionTagRules.Suggest(judge, 4);
+        Check(judgeTags.Contains("判断"), $"判断题应打上「判断」，实际：{string.Join("/", judgeTags)}");
+
+        // 标签清洗
+        CheckEqual("错题", QBank.Core.Ai.TagList.Sanitize("#错题"), "应去掉井号");
+        CheckEqual("第三章", QBank.Core.Ai.TagList.Sanitize("\"第三章\""), "应去掉引号");
+        CheckEqual("数学 英语", QBank.Core.Ai.TagList.Join(QBank.Core.Ai.TagList.Parse("数学, 英语；政治").Take(2)), "应能解析逗号分号顿号");
+        Check(QBank.Core.Ai.TagList.Sanitize(new string('长', 30)).Length <= 10, "超长标签应被截断");
+
+        var bank = new LocalBank(Path.Combine(workDir, "autotag.db"));
+        var questions = new List<Question>
+        {
+            new() { Title = "第二次工业革命开始于哪一年？", Answer = "1860 年代", Type = QuestionType.Completion },
+            new() { Title = "中国的首都是哪座城市？", Answer = "北京", Type = QuestionType.Single },
+            new() { Title = "植物细胞进行光合作用的场所是什么？", Answer = "叶绿体", Type = QuestionType.Completion },
+        };
+        foreach (var q in questions) q.Id = bank.Upsert(q);
+
+        var tagger = new AutoTagger();
+        var cfg = new AutoTagConfig { Enabled = true, Engine = "rule", MaxTags = 4 };
+        var appConfig = new AppConfig();
+
+        var one = await tagger.TagAsync(questions[0], cfg, appConfig);
+        Check(one.Ok, "词表打标签应成功");
+        Check(one.Tags.Count > 0, "应给出至少一个标签");
+
+        // 已有标签的题默认跳过
+        questions[1].Tags = "手动";
+        var (tagged, skipped, failed, _) = await tagger.TagManyAsync(questions, cfg, appConfig, bank.AllTags());
+        CheckEqual(2, tagged, "3 道题里 2 道应被自动打标签");
+        CheckEqual(1, skipped, "已有标签的 1 道应被跳过");
+        CheckEqual(0, failed, "不应有失败");
+
+        var saved = bank.SaveTags(questions.Where(q => !string.IsNullOrWhiteSpace(q.Tags)));
+        Check(saved >= 2, $"保存标签应至少写回 2 条，实际 {saved}");
+        Check(!string.IsNullOrWhiteSpace(bank.GetById(questions[0].Id)!.Tags), "打好的标签应写进库");
+
+        // 覆盖模式：连已有标签的也重新打
+        var overwrite = new AutoTagConfig { Enabled = true, Engine = "rule", MaxTags = 3, Overwrite = true };
+        var (tagged2, skipped2, _, _) = await tagger.TagManyAsync(questions, overwrite, appConfig, bank.AllTags());
+        CheckEqual(3, tagged2, "覆盖模式下 3 道都应重打");
+        CheckEqual(0, skipped2, "覆盖模式下不该有跳过");
+    }
+
+    private static Task TestWebParsingAsync()
+    {
+        // 用一段仿 360 搜索的结果页验证切片与判答案（不联网）
+        const string html = """
+            <html><head><title>中国的首都是哪座城市 - 360搜索</title></head><body>
+            <ul>
+              <li class="res-list" data-result-type="normal">
+                <h3 class="res-title"><a data-mdurl="https://www.zuoyebang.com/question/123">中国的首都是哪里 ?A.北京B.南京C.上海D.武汉</a></h3>
+                <div class="res-desc">中国的首都是哪里 ?A.北京B.南京C.上海D.武汉 正确答案：B 解析：北京是中华人民共和国的首都。</div>
+              </li>
+              <li class="res-list" data-result-type="normal">
+                <h3 class="res-title"><a data-mdurl="https://zhidao.baidu.com/question/456">中国的首都是哪座城市 - 百度知道</a></h3>
+                <div class="res-desc">我国的首都是北京，简称京。</div>
+              </li>
+            </ul>
+            </body></html>
+            """;
+
+        var blocks = HtmlSlicer.Slice(html, WebSearchEngines.So360);
+        Check(blocks.Count >= 2, $"应切出至少 2 个结果块，实际 {blocks.Count}");
+        Check(blocks[0].Url.Contains("zuoyebang"), $"第一个块的链接应取 data-mdurl，实际 {blocks[0].Url}");
+
+        var request = new SearchRequest
+        {
+            Title = "中国的首都是哪座城市？",
+            Options = "A. 上海\nB. 北京\nC. 广州\nD. 深圳",
+            Type = QuestionType.Single,
+        };
+        var cfg = new WebSearchConfig { Enabled = true, Engine = WebSearchEngines.So360, MinScore = 0.6 };
+
+        var options = WebAnswerMatcher.ParseOptions(request.Options);
+        CheckEqual(4, options.Count, "应解析出 4 个选项");
+        CheckEqual("A", options[0].Letter, "第一个选项字母");
+        CheckEqual("北京", options[1].Text, "第二个选项内容");
+
+        var corpus = string.Join("\n", blocks.Select(b => b.Title + "\n" + b.Snippet));
+        var guess = WebAnswerMatcher.Guess(request, corpus, cfg);
+        Check(guess is not null, "应能给出答案猜测");
+        CheckEqual("B", guess!.Answer, $"应猜出 B，实际 {guess.Answer}");
+        Check(guess.Score >= cfg.MinScore, $"把握应达到 {cfg.MinScore}，实际 {guess.Score:F2}（{guess.Reason}）");
+
+        // 判断题
+        var judgeRequest = new SearchRequest { Title = "地球是太阳系中体积最大的行星", Type = QuestionType.Judgement };
+        var judgeGuess = WebAnswerMatcher.Guess(judgeRequest, "地球是太阳系中体积最大的行星 答案：错误。木星才是体积最大的行星。", cfg);
+        Check(judgeGuess is not null && judgeGuess.Answer.Contains("错"), $"判断题应判为错，实际 {judgeGuess?.Answer}");
+
+        // 完全无关的网页不该硬给高把握答案
+        var unrelated = new SearchRequest { Title = "请简述相对论的基本假设", Type = QuestionType.Completion };
+        var weak = WebAnswerMatcher.Guess(unrelated, "今天天气不错，适合出门散步。", cfg);
+        Check(weak is null || weak.Score < 0.75, $"无关网页不该给出高把握答案，实际 {weak?.Score:F2}");
+
         return Task.CompletedTask;
     }
 
@@ -1139,5 +1349,152 @@ internal static class Program
         CheckEqual(1, SettingsBackup.ListQuickBackups(backupDir).Count, "删除后应剩一份");
 
         await Task.CompletedTask;
+    }
+
+    // ---------------- 网页搜索探针（开发排查用，不在自测里） ----------------
+
+    /// <summary>
+    /// 单独跑一次网页搜索，看看某个引擎在本机当前网络下能不能抓、抓到什么、判出什么答案。
+    /// 退出码：0 = 判出了可信答案，2 = 抓到了但没答案，3 = 没抓到。
+    /// </summary>
+    private static async Task<int> RunWebProbeAsync(string title, string options, string? engine, bool tagOnly, string[] args)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            Console.WriteLine("用法：QBank.Cli --web \"题干\" [--options \"A. 甲\\nB. 乙\"] [--engine so360|sogou|bing|baidu]");
+            Console.WriteLine("      [--tag] [--dump <把原始HTML写到哪>] [--html <直接解析本地HTML>]");
+            return 3;
+        }
+
+        var request = new SearchRequest
+        {
+            Title = title,
+            Options = options,
+            Type = QuestionTypeInference.Infer(title, options),
+        };
+        var cfg = new WebSearchConfig { Enabled = true };
+
+        if (tagOnly)
+        {
+            var tags = QuestionTagRules.Suggest(new Question { Title = title, Options = options, Type = request.Type }, 4);
+            Console.WriteLine("词表标签：" + (tags.Count == 0 ? "（没打出来）" : string.Join(" ", tags)));
+            return 0;
+        }
+
+        var chosenEngine = string.IsNullOrWhiteSpace(engine) ? WebSearchEngines.Default : engine!;
+        cfg.Engine = chosenEngine;
+
+        Console.WriteLine($"题干：{title}");
+        if (!string.IsNullOrWhiteSpace(options)) Console.WriteLine($"选项：{options.Replace("\n", " / ")}");
+        Console.WriteLine($"题型：{request.Type.ToChinese()}");
+        Console.WriteLine($"引擎：{WebSearchEngines.DisplayName(chosenEngine)}（{chosenEngine}）");
+
+        var query = WebSearchSource.BuildQuery(request, cfg);
+        Console.WriteLine($"查询词：{query}\n");
+
+        // 想直接看某个本地 HTML 时用 --html，避免反复抓（各家都有限流）
+        var htmlFile = OptionValue(args, "--html");
+        WebFetchResult fetched;
+        var rawForMarkers = string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(htmlFile))
+        {
+            rawForMarkers = File.ReadAllText(htmlFile!);
+            fetched = new WebFetchResult
+            {
+                Blocks = HtmlSlicer.Slice(rawForMarkers, chosenEngine),
+                Url = WebSearchEngines.BuildUrl(chosenEngine, query, cfg.CustomUrlTemplate),
+                Engine = chosenEngine,
+            };
+            Console.WriteLine($"（本地 HTML：{htmlFile}，{rawForMarkers.Length} 字符）");
+        }
+        else
+        {
+            var source = new WebSearchSource();
+            var url = WebSearchEngines.BuildUrl(chosenEngine, query, cfg.CustomUrlTemplate);
+            try
+            {
+                rawForMarkers = await source.FetchHtmlAsync(query, cfg) ?? string.Empty;
+                Console.WriteLine($"原始 HTML：{rawForMarkers.Length} 字符");
+                var dump = OptionValue(args, "--dump");
+                if (!string.IsNullOrWhiteSpace(dump) && rawForMarkers.Length > 0)
+                {
+                    var dumpPath = Path.GetFullPath(dump!);
+                    File.WriteAllText(dumpPath, rawForMarkers);
+                    Console.WriteLine($"原始 HTML 已写到 {dumpPath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("直连抓取失败（下面改走带兜底的流程）：");
+                for (var e = ex; e is not null; e = e.InnerException) Console.WriteLine("  · " + e.Message);
+            }
+
+            fetched = await source.FetchAsync(query, cfg);
+            Console.WriteLine($"（直连地址：{url}）");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("—— 标记统计 ——");
+        foreach (var marker in new[] { "res-list", "res-title", "b_algo", "c-container", "vrwrap", "data-mdurl", "百度安全验证", "antispider" })
+            Console.WriteLine($"  {marker}：{RegexOccurrences(rawForMarkers, marker)} 次");
+        Console.WriteLine($"  解析出的结果块：{fetched.Blocks.Count} 个");
+
+        Console.WriteLine($"\n实际引擎：{fetched.EngineName}（{fetched.Engine}）");
+        Console.WriteLine($"地址：{fetched.Url}");
+        if (!string.IsNullOrWhiteSpace(fetched.Notice)) Console.WriteLine($"换过引擎：{fetched.Notice}");
+        if (!string.IsNullOrWhiteSpace(fetched.Error)) Console.WriteLine($"抓取问题：{fetched.Error}");
+
+        Console.WriteLine("\n—— 解析结果 ——");
+        if (fetched.Blocks.Count == 0)
+        {
+            Console.WriteLine("（没有解析出任何结果块）");
+            return 3;
+        }
+
+        foreach (var block in fetched.Blocks.Take(8))
+        {
+            Console.WriteLine($"[{block.Order}] {block.DisplayTitle}");
+            if (!string.IsNullOrWhiteSpace(block.Url)) Console.WriteLine($"      {block.Url}");
+            var snippet = block.Snippet.Length > 160 ? block.Snippet[..160] + "…" : block.Snippet;
+            Console.WriteLine($"      {snippet.Replace("\n", " ⏎ ")}");
+        }
+
+        Console.WriteLine("\n—— 判定 ——");
+        var guess = WebAnswerMatcher.GuessFromBlocks(request, fetched.Blocks, cfg);
+        if (guess is null)
+        {
+            Console.WriteLine("没判出答案。");
+            return 2;
+        }
+
+        Console.WriteLine($"答案：{guess.Answer}（把握 {guess.ScoreText}）");
+        Console.WriteLine($"理由：{guess.Reason}");
+        if (guess.Evidence > 0) Console.WriteLine($"依据：命中 {guess.Evidence} 条证据，题干吻合度 {guess.Coverage:P0}");
+        Console.WriteLine($"（可信线 {cfg.MinScore:P0}）");
+
+        if (guess.Score >= cfg.MinScore) return 0;
+        Console.WriteLine("结论：把握不够，按现在的设置不会用它。");
+        return 2;
+    }
+
+    private static string? OptionValue(string[] args, string name)
+    {
+        var index = Array.IndexOf(args, name);
+        if (index < 0 || index + 1 >= args.Length) return null;
+        return args[index + 1];
+    }
+
+    private static int RegexOccurrences(string text, string needle)
+    {
+        if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(needle)) return 0;
+        var count = 0;
+        var index = 0;
+        while ((index = text.IndexOf(needle, index, StringComparison.OrdinalIgnoreCase)) >= 0)
+        {
+            count++;
+            index += needle.Length;
+        }
+        return count;
     }
 }

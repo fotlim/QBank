@@ -8,6 +8,7 @@ using QBank.Core.Ai;
 using QBank.Core.Models;
 using QBank.Core.Ocr;
 using QBank.Core.Ocs;
+using QBank.Core.Search;
 using QBank.Core.Storage;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage.Pickers;
@@ -197,6 +198,16 @@ public sealed partial class SettingsPage : Page
                     ShowGroup("models");
                     NetworkCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
                     break;
+                case "web":
+                case "websearch":
+                    ShowGroup("sources");
+                    WebSearchCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
+                    break;
+                case "tag":
+                case "autotag":
+                    ShowGroup("prefs");
+                    AutoTagCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
+                    break;
                 case "ocs":
                     ShowGroup("sources");
                     OcsListCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
@@ -316,10 +327,285 @@ public sealed partial class SettingsPage : Page
             ReloadBackupList();
 
             RefreshStats();
+
+            // 网页搜索
+            var web = cfg.WebSearch ??= new WebSearchConfig();
+            WebEnableBox.IsChecked = web.Enabled;
+            SelectWebEngine(web.Engine);
+            WebMaxBox.Value = web.MaxResults;
+            WebMinScoreBox.Value = web.MinScore;
+            WebQueryCharsBox.Value = web.QueryChars;
+            WebTimeoutBox.Value = web.TimeoutSeconds;
+            WebSkipAiBox.IsChecked = web.SkipAiOnHit;
+            WebWithOptionsBox.IsChecked = web.QueryWithOptions;
+            WebCustomBox.Text = web.CustomUrlTemplate ?? string.Empty;
+            UpdateWebEngineUi();
+
+            // 自动标签
+            var tag = cfg.AutoTag ??= new AutoTagConfig();
+            AutoTagEnableBox.IsChecked = tag.Enabled;
+            AutoTagOverwriteBox.IsChecked = tag.Overwrite;
+            AutoTagMaxBox.Value = tag.MaxTags;
+            SelectTagEngine(tag.Engine);
+            FillTagProviders(cfg, tag.ProviderId);
+            UpdateAutoTagUi();
         }
         finally
         {
             _loading = false;
+        }
+    }
+
+    // ============ 网页搜索 ============
+
+    private void FillWebEngineCombo()
+    {
+        if (WebEngineBox.Items.Count > 0) return;
+        foreach (var engine in WebSearchEngines.All)
+            WebEngineBox.Items.Add(new ComboBoxItem { Content = WebSearchEngines.DisplayName(engine), Tag = engine });
+    }
+
+    private void SelectWebEngine(string? engine)
+    {
+        FillWebEngineCombo();
+        var want = string.IsNullOrWhiteSpace(engine) ? WebSearchEngines.Default : engine;
+        for (var i = 0; i < WebEngineBox.Items.Count; i++)
+        {
+            if (WebEngineBox.Items[i] is ComboBoxItem item &&
+                string.Equals(item.Tag as string, want, StringComparison.OrdinalIgnoreCase))
+            {
+                WebEngineBox.SelectedIndex = i;
+                return;
+            }
+        }
+        WebEngineBox.SelectedIndex = 0;
+    }
+
+    private string CurrentWebEngine() =>
+        (WebEngineBox.SelectedItem as ComboBoxItem)?.Tag as string ?? WebSearchEngines.Default;
+
+    private void OnWebEngineChanged(object sender, SelectionChangedEventArgs e) => UpdateWebEngineUi();
+
+    private void OnWebOptionChanged(object sender, RoutedEventArgs e) => UpdateWebEngineUi();
+
+    private void UpdateWebEngineUi()
+    {
+        if (WebCustomBox is null) return;
+        var engine = CurrentWebEngine();
+        WebCustomBox.Visibility = engine == WebSearchEngines.Custom ? Visibility.Visible : Visibility.Collapsed;
+
+        var limit = WebSearchEngines.DescribeLimitation(engine);
+        var curl = WebSearchSource.FindCurl();
+        var suffix = curl is null ? "（本机没有 curl.exe，个别站点可能抓不到）" : string.Empty;
+        if (WebStatusText.Text.Length == 0 || !WebStatusText.Text.StartsWith("正在", StringComparison.Ordinal))
+            WebStatusText.Text = limit + suffix;
+    }
+
+    private void ApplyWebToConfig()
+    {
+        var web = AppServices.Current.Config.Config.WebSearch ??= new WebSearchConfig();
+        web.Enabled = WebEnableBox.IsChecked == true;
+        web.Engine = CurrentWebEngine();
+        web.CustomUrlTemplate = WebCustomBox.Text?.Trim() ?? string.Empty;
+        web.MaxResults = double.IsNaN(WebMaxBox.Value) ? 8 : (int)WebMaxBox.Value;
+        web.MinScore = double.IsNaN(WebMinScoreBox.Value) ? 0.62 : WebMinScoreBox.Value;
+        web.QueryChars = double.IsNaN(WebQueryCharsBox.Value) ? 48 : (int)WebQueryCharsBox.Value;
+        web.TimeoutSeconds = double.IsNaN(WebTimeoutBox.Value) ? 12 : (int)WebTimeoutBox.Value;
+        web.SkipAiOnHit = WebSkipAiBox.IsChecked == true;
+        web.QueryWithOptions = WebWithOptionsBox.IsChecked == true;
+    }
+
+    /// <summary>拿一道示例题真去搜一次，把过程和结论都摊开给用户看。</summary>
+    private async void OnTestWebSearch(object sender, RoutedEventArgs e)
+    {
+        ApplyWebToConfig();
+        AppServices.Current.SaveConfig();
+
+        var cfg = AppServices.Current.Config.Config;
+        var engineName = WebSearchEngines.DisplayName(cfg.WebSearch.Engine);
+
+        var request = new SearchRequest
+        {
+            Title = "中国的首都是哪座城市？",
+            Options = "A. 上海\nB. 北京\nC. 广州\nD. 深圳",
+            Type = QuestionType.Single,
+        };
+
+        WebTestButton.IsEnabled = false;
+        WebStatusText.Text = $"正在用{engineName}搜「中国的首都是哪座城市？」…";
+        try
+        {
+            var outcome = await AppServices.Current.Web.SearchAsync(request, cfg);
+
+            if (outcome.Hits.Count > 0)
+            {
+                var hit = outcome.Hits[0];
+                WebStatusText.Text = $"✅ 用{engineName}搜到了：{hit.Answer}（把握 {hit.Score:P0}）";
+                await ShowDialogAsync("网页搜索测试",
+                    $"引擎：{engineName}\n耗时：{outcome.ElapsedMs}ms\n\n题干：中国的首都是哪座城市？\nA. 上海　B. 北京　C. 广州　D. 深圳\n\n" +
+                    $"判定答案：{hit.Answer}\n把握：{hit.Score:P0}（可信线 {cfg.WebSearch.MinScore:P0}）\n\n理由：\n{hit.Note}",
+                    wide: true);
+                return;
+            }
+
+            var detail = outcome.Notices.Count > 0
+                ? string.Join("\n· ", outcome.Notices)
+                : "没有解析出可用的结果。";
+            WebStatusText.Text = $"⚠️ 这次没搜到可信答案（{outcome.ElapsedMs}ms）";
+            await ShowDialogAsync("网页搜索测试",
+                $"引擎：{engineName}\n耗时：{outcome.ElapsedMs}ms\n\n这次没搜到可信答案：\n· {detail}\n\n" +
+                "可以换个搜索引擎再试（搜狗 / 360 / 必应 的可用性随网络环境变），或者把可信线调低一点。",
+                wide: true);
+        }
+        catch (Exception ex)
+        {
+            WebStatusText.Text = "测试失败：" + ex.Message;
+        }
+        finally
+        {
+            WebTestButton.IsEnabled = true;
+        }
+    }
+
+    // ============ 自动标签 ============
+
+    private static (string Key, string Title, string Hint)[] TagEngines => new[]
+    {
+        ("rule", "内置词表（离线 · 零成本）", "按学科关键词和题型判断，不花 token"),
+        ("local", "本机模型（Ollama 等）", "用本机跑的小模型判断，不花云端 token"),
+        ("ai", "云端模型", "用你配置的 AI 服务判断，最灵活"),
+    };
+
+    private void FillTagEngineCombo()
+    {
+        if (AutoTagEngineBox.Items.Count > 0) return;
+        foreach (var (key, title, hint) in TagEngines)
+            AutoTagEngineBox.Items.Add(new ComboBoxItem { Content = title, Tag = key });
+    }
+
+    private void SelectTagEngine(string? engine)
+    {
+        FillTagEngineCombo();
+        var want = string.IsNullOrWhiteSpace(engine) ? "rule" : engine;
+        for (var i = 0; i < AutoTagEngineBox.Items.Count; i++)
+        {
+            if (AutoTagEngineBox.Items[i] is ComboBoxItem item &&
+                string.Equals(item.Tag as string, want, StringComparison.OrdinalIgnoreCase))
+            {
+                AutoTagEngineBox.SelectedIndex = i;
+                return;
+            }
+        }
+        AutoTagEngineBox.SelectedIndex = 0;
+    }
+
+    private string CurrentTagEngine() =>
+        (AutoTagEngineBox.SelectedItem as ComboBoxItem)?.Tag as string ?? "rule";
+
+    private void FillTagProviders(AppConfig cfg, string? pinned)
+    {
+        AutoTagProviderBox.Items.Clear();
+        foreach (var provider in cfg.AiProviders)
+        {
+            AutoTagProviderBox.Items.Add(new ComboBoxItem
+            {
+                Content = string.IsNullOrWhiteSpace(provider.Name) ? provider.ProviderKind : provider.Name,
+                Tag = provider.Id,
+            });
+        }
+
+        if (AutoTagProviderBox.Items.Count == 0)
+        {
+            AutoTagProviderBox.Items.Add(new ComboBoxItem { Content = "（还没配模型）", Tag = string.Empty });
+        }
+
+        var index = 0;
+        if (!string.IsNullOrWhiteSpace(pinned))
+        {
+            for (var i = 0; i < AutoTagProviderBox.Items.Count; i++)
+            {
+                if (AutoTagProviderBox.Items[i] is ComboBoxItem item &&
+                    string.Equals(item.Tag as string, pinned, StringComparison.Ordinal))
+                {
+                    index = i;
+                    break;
+                }
+            }
+        }
+        AutoTagProviderBox.SelectedIndex = index;
+    }
+
+    private void OnAutoTagEngineChanged(object sender, SelectionChangedEventArgs e) => UpdateAutoTagUi();
+
+    private void UpdateAutoTagUi()
+    {
+        if (AutoTagProviderBox is null) return;
+        var engine = CurrentTagEngine();
+        AutoTagProviderBox.Visibility = engine is "ai" or "local" ? Visibility.Visible : Visibility.Collapsed;
+        AutoTagButton.IsEnabled = AutoTagEnableBox.IsChecked == true;
+    }
+
+    private void ApplyAutoTagToConfig()
+    {
+        var tag = AppServices.Current.Config.Config.AutoTag ??= new AutoTagConfig();
+        tag.Enabled = AutoTagEnableBox.IsChecked == true;
+        tag.Overwrite = AutoTagOverwriteBox.IsChecked == true;
+        tag.Engine = CurrentTagEngine();
+        tag.MaxTags = double.IsNaN(AutoTagMaxBox.Value) ? 4 : (int)AutoTagMaxBox.Value;
+        tag.ProviderId = (AutoTagProviderBox.SelectedItem as ComboBoxItem)?.Tag as string ?? string.Empty;
+    }
+
+    private async void OnAutoTagBatch(object sender, RoutedEventArgs e)
+    {
+        ApplyAutoTagToConfig();
+        AppServices.Current.SaveConfig();
+
+        var cfg = AppServices.Current.Config.Config;
+        var bank = AppServices.Current.Bank;
+
+        List<Question> pending;
+        try
+        {
+            pending = cfg.AutoTag.Overwrite
+                ? bank.Query(null, null, 0, 200)
+                : bank.QueryUntagged(200);
+        }
+        catch (Exception ex)
+        {
+            AutoTagStatusText.Text = "读取题库失败：" + ex.Message;
+            return;
+        }
+
+        if (pending.Count == 0)
+        {
+            AutoTagStatusText.Text = cfg.AutoTag.Overwrite
+                ? "题库里还没有题目。"
+                : "所有题目都有标签了，没有要处理的。";
+            return;
+        }
+
+        AutoTagButton.IsEnabled = false;
+        AutoTagStatusText.Text = $"正在给 {pending.Count} 道题打标签…";
+
+        try
+        {
+            var known = bank.AllTags();
+            var (tagged, skipped, failed, errors) = await AppServices.Current.Tagger.TagManyAsync(
+                pending, cfg.AutoTag, cfg, known);
+
+            bank.SaveTags(pending.Where(q => !string.IsNullOrWhiteSpace(q.Tags)).ToList());
+
+            AutoTagStatusText.Text = $"完成：打上标签 {tagged} 道，跳过 {skipped} 道，失败 {failed} 道。";
+            if (errors.Count > 0) AutoTagStatusText.Text += " 例：" + errors[0];
+            RefreshStats();
+        }
+        catch (Exception ex)
+        {
+            AutoTagStatusText.Text = "打标签失败：" + ex.Message;
+        }
+        finally
+        {
+            UpdateAutoTagUi();
         }
     }
 
@@ -946,6 +1232,8 @@ public sealed partial class SettingsPage : Page
         ApplyOcsBridgeToConfig();
         ApplyNetworkToConfig();
         ApplyWindowToConfig();
+        ApplyWebToConfig();
+        ApplyAutoTagToConfig();
     }
 
     private BackupScope CurrentBackupScope()
@@ -1404,6 +1692,8 @@ public sealed partial class SettingsPage : Page
             ApplyOcsBridgeToConfig();
             ApplyNetworkToConfig();
             ApplyWindowToConfig();
+            ApplyWebToConfig();
+            ApplyAutoTagToConfig();
 
             AppServices.Current.SaveConfig();
             UpdateOcrDescribe();

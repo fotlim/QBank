@@ -25,3 +25,5 @@ tools/shots/
 
 # 自测临时目录
 .selftest/
+tools/probe-*.cs
+tools/raw.html

@@ -5,11 +5,13 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     NavigationCacheMode="Required">
 
-    <Grid Padding="20,12,20,20" RowSpacing="12">
+    <Grid Padding="20,12,20,20" RowSpacing="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <Grid Grid.Row="0" ColumnSpacing="12">
@@ -48,16 +50,21 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <TextBox x:Name="SearchBox" PlaceholderText="搜索题干里的关键词…" TextChanged="OnSearchChanged" />
-            <ComboBox x:Name="FilterType" Grid.Column="1" Width="140" SelectedIndex="0" SelectionChanged="OnFilterChanged">
+            <TextBox x:Name="SearchBox" PlaceholderText="搜索题干、答案或标签…" TextChanged="OnSearchChanged" />
+            <ComboBox x:Name="FilterType" Grid.Column="1" Width="130" SelectedIndex="0" SelectionChanged="OnFilterChanged">
                 <ComboBoxItem Content="全部题型" />
                 <ComboBoxItem Content="单选题" />
                 <ComboBoxItem Content="多选题" />
                 <ComboBoxItem Content="判断题" />
                 <ComboBoxItem Content="填空题" />
             </ComboBox>
-            <ComboBox x:Name="SortBox" Grid.Column="2" Width="150" SelectedIndex="0" SelectionChanged="OnFilterChanged">
+            <ComboBox x:Name="FilterTag" Grid.Column="2" Width="150" SelectedIndex="0" SelectionChanged="OnFilterChanged">
+                <ComboBoxItem Content="全部标签" Tag="" />
+                <ComboBoxItem Content="★ 收藏" Tag="★收藏" />
+            </ComboBox>
+            <ComboBox x:Name="SortBox" Grid.Column="3" Width="140" SelectedIndex="0" SelectionChanged="OnFilterChanged">
                 <ComboBoxItem Content="按更新时间" Tag="updated" />
                 <ComboBoxItem Content="按命中次数" Tag="hits" />
                 <ComboBoxItem Content="按创建时间" Tag="created" />
@@ -65,8 +72,39 @@
             </ComboBox>
         </Grid>
 
-        <Grid Grid.Row="2">
-            <ListView x:Name="QuestionList" SelectionMode="Single">
+        <Grid Grid.Row="2" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="SelectionText" Text="没有选中题目" Style="{StaticResource Subtle}"
+                       VerticalAlignment="Center" MinWidth="120" />
+            <Button Grid.Column="1" Content="全选本页" Click="OnSelectAll" VerticalAlignment="Center" />
+            <Button Grid.Column="2" Content="清空选择" Click="OnClearSelection" VerticalAlignment="Center" />
+            <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button Content="批量操作" IsEnabled="False" x:Name="BulkButton">
+                    <Button.Flyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem Text="加标签…" Click="OnBulkAddTag" />
+                            <MenuFlyoutItem Text="去掉标签…" Click="OnBulkRemoveTag" />
+                            <MenuFlyoutItem Text="设为收藏" Click="OnBulkFavorite" />
+                            <MenuFlyoutItem Text="取消收藏" Click="OnBulkUnfavorite" />
+                            <MenuFlyoutSeparator />
+                            <MenuFlyoutItem Text="自动打标签（按设置里的引擎）" Click="OnBulkAutoTag" />
+                            <MenuFlyoutSeparator />
+                            <MenuFlyoutItem Text="删除选中的题目" Click="OnBulkDelete" />
+                        </MenuFlyout>
+                    </Button.Flyout>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="3">
+            <ListView x:Name="QuestionList" SelectionMode="Multiple" SelectionChanged="OnSelectionChanged">
             <ListView.ItemTemplate>
                 <DataTemplate>
                     <Border Padding="12" Margin="0,0,0,6" CornerRadius="6"
@@ -77,15 +115,19 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <StackPanel Spacing="4">
                                 <TextBlock Text="{Binding Title}" TextWrapping="Wrap" FontSize="14" />
                                 <TextBlock Text="{Binding MetaText}" Style="{StaticResource Subtle}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding TagText}" FontSize="12"
+                                           Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" TextWrapping="Wrap" />
                             </StackPanel>
                             <TextBlock Grid.Column="1" Text="{Binding Answer}" FontSize="16" FontWeight="SemiBold"
-                                       VerticalAlignment="Center"
+                                       VerticalAlignment="Center" MaxWidth="220" TextWrapping="Wrap"
                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
-                            <Button Grid.Column="2" Content="删除" Click="OnDeleteOne" Tag="{Binding}" VerticalAlignment="Center" />
+                            <Button Grid.Column="2" Content="编辑" Click="OnEditOne" Tag="{Binding}" VerticalAlignment="Center" />
+                            <Button Grid.Column="3" Content="删除" Click="OnDeleteOne" Tag="{Binding}" VerticalAlignment="Center" />
                         </Grid>
                     </Border>
                 </DataTemplate>
@@ -95,10 +137,29 @@
             <StackPanel x:Name="EmptyHint" HorizontalAlignment="Center" VerticalAlignment="Center"
                         Spacing="6" Visibility="Collapsed">
                 <FontIcon Glyph="&#xE8F1;" FontSize="36" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-                <TextBlock Text="题库还是空的" FontSize="16" HorizontalAlignment="Center" />
+                <TextBlock Text="这里还没有题目" FontSize="16" HorizontalAlignment="Center" />
                 <TextBlock Text="点右上角「导入」贴题库文件，或搜到题时点「存入本地题库」" Style="{StaticResource Subtle}"
                            HorizontalAlignment="Center" TextWrapping="Wrap" MaxWidth="420" TextAlignment="Center" />
             </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="4" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="PageText" Style="{StaticResource Subtle}" VerticalAlignment="Center" />
+            <ComboBox x:Name="PageSizeBox" Grid.Column="1" Width="120" SelectionChanged="OnPageSizeChanged">
+                <ComboBoxItem Content="每页 50 条" Tag="50" />
+                <ComboBoxItem Content="每页 100 条" Tag="100" />
+                <ComboBoxItem Content="每页 200 条" Tag="200" />
+            </ComboBox>
+            <Button x:Name="FirstPageButton" Grid.Column="2" Content="首页" Click="OnFirstPage" />
+            <Button x:Name="PrevPageButton" Grid.Column="3" Content="上一页" Click="OnPrevPage" />
+            <Button x:Name="NextPageButton" Grid.Column="4" Content="下一页" Click="OnNextPage" />
         </Grid>
     </Grid>
 </Page>

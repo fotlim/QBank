@@ -25,6 +25,8 @@ public sealed class AppServices
     public HistoryStore History { get; private set; } = null!;
     public LanShareService Lan { get; private set; } = null!;
     public SearchService Search { get; private set; } = null!;
+    public WebSearchSource Web { get; private set; } = null!;
+    public AutoTagger Tagger { get; private set; } = null!;
     public OcrService Ocr { get; private set; } = null!;
     public AiModelCatalog ModelCatalog { get; private set; } = null!;
     public OcsBridgeService OcsBridge { get; private set; } = null!;
@@ -86,8 +88,10 @@ public sealed class AppServices
         }
 
         Lan = new LanShareService(Bank);
-        Search = new SearchService(Config, Bank, History, Lan);
+        Web = new WebSearchSource();
+        Search = new SearchService(Config, Bank, History, Lan, null, null, Web);
         Ocr = new OcrService(() => Config.Config);
+        Tagger = new AutoTagger();
         ModelCatalog = new AiModelCatalog();
         OcsBridge = new OcsBridgeService();
 

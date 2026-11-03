@@ -11,14 +11,14 @@ namespace QBank.Core.Lan;
 ///   GET  /qbank/ping       → LanInfo
 ///   POST /qbank/query      → LanQueryResponse（搜题）
 ///   POST /qbank/add        → 写入一条题目（需 AllowRemoteWrite）
-///   GET  /qbank/export     → 全量 JSON（需 AllowRemoteWrite）
+///   GET  /qbank/export     → 题库 JSON（需 AllowRemoteWrite；带 since=ISO 时间则只导出自那以后改动的，用来做增量同步）
 /// </summary>
 public sealed class LanBankServer : IDisposable
 {
     private readonly LanServerConfig _config;
     private readonly Func<LanQueryRequest, LanQueryResponse> _queryHandler;
     private readonly Func<LanHit, bool>? _addHandler;
-    private readonly Func<string>? _exportHandler;
+    private readonly Func<DateTimeOffset?, int, string>? _exportHandler;
     private readonly Func<LanInfo> _infoProvider;
 
     private MiniHttpServer? _server;
@@ -28,7 +28,7 @@ public sealed class LanBankServer : IDisposable
         Func<LanQueryRequest, LanQueryResponse> queryHandler,
         Func<LanInfo> infoProvider,
         Func<LanHit, bool>? addHandler = null,
-        Func<string>? exportHandler = null)
+        Func<DateTimeOffset?, int, string>? exportHandler = null)
     {
         _config = config;
         _queryHandler = queryHandler;
@@ -147,7 +147,26 @@ public sealed class LanBankServer : IDisposable
             if (_exportHandler is null)
                 return Error("服务端不支持导出", 501, "Not Implemented");
 
-            return MiniHttpResponse.Json(_exportHandler());
+            // since=ISO 时间：只导出那之后改动过的题目（增量同步用）。解析不了就当全量。
+            DateTimeOffset? since = null;
+            var sinceText = request.QueryValue("since");
+            if (!string.IsNullOrWhiteSpace(sinceText) &&
+                DateTimeOffset.TryParse(sinceText, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var parsed))
+            {
+                since = parsed;
+            }
+
+            var limit = 0;
+            var limitText = request.QueryValue("limit");
+            if (!string.IsNullOrWhiteSpace(limitText) && int.TryParse(limitText, out var parsedLimit))
+                limit = Math.Clamp(parsedLimit, 0, 100000);
+
+            Log?.Invoke(this, since is null
+                ? $"来自 {remote} 的题库导出（全量）"
+                : $"来自 {remote} 的题库导出（{since:yyyy-MM-dd HH:mm:ss} 之后）");
+
+            return MiniHttpResponse.Json(_exportHandler(since, limit));
         }
 
         return Error($"未知接口：{path}", 404, "Not Found");

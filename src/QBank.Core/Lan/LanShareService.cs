@@ -73,7 +73,7 @@ public sealed class LanShareService : IDisposable
                     HandleQuery,
                     BuildInfo,
                     Config.AllowRemoteWrite ? HandleRemoteAdd : null,
-                    Config.AllowRemoteWrite ? _bank.ExportJson : null);
+                    Config.AllowRemoteWrite ? (since, limit) => _bank.ExportJson(since, limit) : null);
                 _server.Log += (_, message) => Log?.Invoke(this, message);
             }
 
@@ -263,7 +263,67 @@ public sealed class LanShareService : IDisposable
         return outcome;
     }
 
-    /// <summary>把本地新增题目推送给远端（对方需允许写入）。</summary>
+    /// <summary>从一个节点拉题库。incremental=true 时只拉对方自上次同步以后改动过的题目。</summary>
+    public async Task<LanPullResult> PullFromAsync(
+        LanPeerConfig peer, bool incremental, CancellationToken ct = default)
+    {
+        var result = new LanPullResult
+        {
+            PeerName = string.IsNullOrWhiteSpace(peer.Name) ? peer.DisplayName : peer.Name,
+            Incremental = incremental,
+        };
+
+        var since = incremental ? peer.LastSyncAt : null;
+
+        using var client = new LanBankClient(peer);
+        try
+        {
+            var json = await client.ExportAsync(since, 0, ct).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                result.Error = "节点没有返回内容（对方可能没开「允许局域网读写」）";
+                return result;
+            }
+
+            var imported = _bank.Import(json, "json");
+            result.Added = imported.Added;
+            result.Updated = imported.Updated;
+            result.Skipped = imported.Skipped;
+            result.Ok = true;
+
+            peer.LastSyncAt = DateTimeOffset.Now;
+            peer.LastSyncCount = imported.Added + imported.Updated;
+            peer.LastSeenAt = DateTimeOffset.Now;
+            Log?.Invoke(this, $"从「{result.PeerName}」拉了 {result.Added + result.Updated} 道题" +
+                              (incremental ? "（增量）" : "（全量）"));
+        }
+        catch (TaskCanceledException)
+        {
+            result.Error = "连接超时";
+        }
+        catch (Exception ex)
+        {
+            result.Error = "无法连接：" + ex.Message;
+        }
+
+        return result;
+    }
+
+    /// <summary>把「上次同步时间」清掉，下次拉取就会是全量。</summary>
+    public int ForgetSyncHistory()
+    {
+        var count = 0;
+        foreach (var peer in KnownPeers)
+        {
+            if (peer.LastSyncAt is null && peer.LastSyncCount == 0) continue;
+            peer.LastSyncAt = null;
+            peer.LastSyncCount = 0;
+            count++;
+        }
+        return count;
+    }
+
+    /// <summary>把本地题目推送给远端（对方需允许写入）。</summary>
     public async Task<(int Ok, int Failed)> PushAsync(IEnumerable<Question> questions, CancellationToken ct = default)
     {
         var peers = KnownPeers.ToList();

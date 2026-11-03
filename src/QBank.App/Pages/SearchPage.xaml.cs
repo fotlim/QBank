@@ -2,10 +2,14 @@ using System.Collections.ObjectModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using QBank.App.Controls;
 using QBank.App.Services;
 using QBank.Core.Models;
 using QBank.Core.Ocr;
+using Windows.ApplicationModel.DataTransfer;
+using Windows.Storage;
 using Windows.Storage.Pickers;
+using Windows.Storage.Streams;
 using Windows.System;
 
 namespace QBank.App.Pages;
@@ -58,6 +62,7 @@ public sealed partial class SearchPage : Page
         AddToggle("局域网共享", cfg.Search.UseLanShare, v => cfg.Search.UseLanShare = v);
         AddToggle("在线题库（OCS）", cfg.Search.UseOcs, v => cfg.Search.UseOcs = v);
         AddToggle("AI 模型", cfg.Search.UseAi, v => cfg.Search.UseAi = v);
+        AddToggle("网页搜索（省 token）", cfg.Search.UseWeb, v => cfg.Search.UseWeb = v);
 
         void AddToggle(string text, bool value, Action<bool> apply)
         {
@@ -132,6 +137,7 @@ public sealed partial class SearchPage : Page
             UseLanShare = cfg.Search.UseLanShare,
             UseOcs = cfg.Search.UseOcs,
             UseAi = cfg.Search.UseAi,
+            UseWeb = cfg.Search.UseWeb,
             TimeoutSeconds = cfg.Search.TimeoutSeconds,
             RecordHistory = cfg.Search.RecordHistory,
         };
@@ -289,6 +295,30 @@ public sealed partial class SearchPage : Page
         }
     }
 
+    /// <summary>框选截图：先把整个屏幕拍下来，再让用户在覆盖窗口里拉框，最后只识别框里那块。</summary>
+    private async void OnOcrRegion(object sender, RoutedEventArgs e)
+    {
+        var full = ScreenCapture.CaptureAllScreens();
+        if (full is null)
+        {
+            await ShowDialogAsync("截图失败", "没能截到屏幕内容，可能是权限或显示环境问题。");
+            return;
+        }
+
+        OcrStatusText.Text = "在屏幕上拉一个框，松手就开始识别…";
+        var picker = new RegionPickerWindow(full);
+        picker.Picked += async (_, bytes) =>
+        {
+            if (bytes is null || bytes.Length == 0)
+            {
+                OcrStatusText.Text = "框选已取消。";
+                return;
+            }
+            await RecognizeIntoTitleAsync(bytes);
+        };
+        picker.Activate();
+    }
+
     private async void OnOcrScreenshot(object sender, RoutedEventArgs e)
     {
         var bytes = ScreenCapture.CapturePrimaryScreen();
@@ -298,6 +328,123 @@ public sealed partial class SearchPage : Page
             return;
         }
         await RecognizeIntoTitleAsync(bytes);
+    }
+
+    /// <summary>Ctrl+V：剪贴板里有图片就直接识别（Win+Shift+S 截完图就能用）。</summary>
+    private async void OnPasteAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        await PasteImageFromClipboardAsync();
+    }
+
+    private async Task PasteImageFromClipboardAsync()
+    {
+        try
+        {
+            var content = Clipboard.GetContent();
+            if (content.Contains(StandardDataFormats.Bitmap))
+            {
+                var reference = await content.GetBitmapAsync();
+                using var stream = await reference.OpenReadAsync();
+                var bytes = await ReadStreamAsync(stream);
+                if (bytes.Length > 0)
+                {
+                    await RecognizeIntoTitleAsync(bytes);
+                    return;
+                }
+            }
+
+            // 从资源管理器复制的图片文件
+            if (content.Contains(StandardDataFormats.StorageItems))
+            {
+                var items = await content.GetStorageItemsAsync();
+                foreach (var item in items.OfType<StorageFile>())
+                {
+                    var ext = Path.GetExtension(item.Name).ToLowerInvariant();
+                    if (ext is not (".png" or ".jpg" or ".jpeg" or ".bmp" or ".webp" or ".gif")) continue;
+                    using var fileStream = await item.OpenStreamForReadAsync();
+                    using var ms = new MemoryStream();
+                    await fileStream.CopyToAsync(ms);
+                    await RecognizeIntoTitleAsync(ms.ToArray());
+                    return;
+                }
+            }
+
+            if (content.Contains(StandardDataFormats.Text))
+            {
+                var text = await content.GetTextAsync();
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    TitleBox.Text = text.Trim();
+                    OcrStatusText.Text = "剪贴板里是文字，已经贴到题干框了。";
+                    return;
+                }
+            }
+
+            OcrStatusText.Text = "剪贴板里没有图片。可以用 Win+Shift+S 截一张，再按 Ctrl+V。";
+        }
+        catch (Exception ex)
+        {
+            OcrStatusText.Text = "粘贴失败：" + ex.Message;
+        }
+    }
+
+    private static async Task<byte[]> ReadStreamAsync(IRandomAccessStreamWithContentType stream)
+    {
+        using var ms = new MemoryStream();
+        await stream.AsStreamForRead().CopyToAsync(ms);
+        return ms.ToArray();
+    }
+
+    private void OnPageDragOver(object sender, DragEventArgs e)
+    {
+        if (e.DataView.Contains(StandardDataFormats.Bitmap) || e.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            e.AcceptedOperation = DataPackageOperation.Copy;
+            e.DragUIOverride.Caption = "松手就开始识别题目";
+            e.DragUIOverride.IsCaptionVisible = true;
+        }
+    }
+
+    private async void OnPageDrop(object sender, DragEventArgs e)
+    {
+        try
+        {
+            if (e.DataView.Contains(StandardDataFormats.Bitmap))
+            {
+                var reference = await e.DataView.GetBitmapAsync();
+                using var stream = await reference.OpenReadAsync();
+                var bytes = await ReadStreamAsync(stream);
+                if (bytes.Length > 0)
+                {
+                    OcrStatusText.Text = "已接住拖进来的图片，正在识别…";
+                    await RecognizeIntoTitleAsync(bytes);
+                    return;
+                }
+            }
+
+            if (e.DataView.Contains(StandardDataFormats.StorageItems))
+            {
+                var items = await e.DataView.GetStorageItemsAsync();
+                foreach (var item in items.OfType<StorageFile>())
+                {
+                    var ext = Path.GetExtension(item.Name).ToLowerInvariant();
+                    if (ext is not (".png" or ".jpg" or ".jpeg" or ".bmp" or ".webp" or ".gif")) continue;
+                    using var fileStream = await item.OpenStreamForReadAsync();
+                    using var ms = new MemoryStream();
+                    await fileStream.CopyToAsync(ms);
+                    OcrStatusText.Text = "已接住拖进来的图片，正在识别…";
+                    await RecognizeIntoTitleAsync(ms.ToArray());
+                    return;
+                }
+            }
+
+            OcrStatusText.Text = "只认识图片文件（png / jpg / bmp / webp）。";
+        }
+        catch (Exception ex)
+        {
+            await ShowDialogAsync("拖拽识别失败", ex.Message);
+        }
     }
 
     private async void OnOcrFile(object sender, RoutedEventArgs e)

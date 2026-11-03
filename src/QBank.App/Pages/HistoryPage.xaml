@@ -10,6 +10,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <Grid Grid.Row="0" ColumnSpacing="12">
@@ -80,6 +81,25 @@
                 <TextBlock Text="去「搜题」页搜一次，这里会留下每次的题干、答案、来源和耗时" Style="{StaticResource Subtle}"
                            HorizontalAlignment="Center" TextWrapping="Wrap" MaxWidth="420" TextAlignment="Center" />
             </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="3" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="PageText" Style="{StaticResource Subtle}" VerticalAlignment="Center" />
+            <ComboBox x:Name="PageSizeBox" Grid.Column="1" Width="130" SelectionChanged="OnPageSizeChanged">
+                <ComboBoxItem Content="每页 50 条" Tag="50" />
+                <ComboBoxItem Content="每页 100 条" Tag="100" />
+                <ComboBoxItem Content="每页 200 条" Tag="200" />
+            </ComboBox>
+            <Button x:Name="FirstPageButton" Grid.Column="2" Content="首页" Click="OnFirstPage" />
+            <Button x:Name="PrevPageButton" Grid.Column="3" Content="上一页" Click="OnPrevPage" />
+            <Button x:Name="NextPageButton" Grid.Column="4" Content="下一页" Click="OnNextPage" />
         </Grid>
     </Grid>
 </Page>

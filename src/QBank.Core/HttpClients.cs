@@ -8,6 +8,7 @@ namespace QBank.Core;
 public static class HttpClients
 {
     private static HttpClient? _shared;
+    private static HttpClient? _scrape;
     private static NetworkConfig? _network;
     private static string? _autoFallbackNote;
 
@@ -31,20 +32,34 @@ public static class HttpClients
     /// <summary>默认客户端（按当前的代理设置构建，设置变了会自动重建）。</summary>
     public static HttpClient Shared => _shared ??= Create();
 
+    /// <summary>
+    /// 抓网页用的客户端：只协商 HTTP/1.1。
+    /// 有些国内搜索站的反爬在 HTTP/2 的 ALPN 协商上就握手失败（直接报「身份验证失败」），
+    /// 只报 http/1.1 反而正常。
+    /// </summary>
+    public static HttpClient ForWebScraping => _scrape ??= Create(Network, false, null, preferHttp11: true);
+
     /// <summary>配置变了以后调用，下次取 Shared 会重新构建。</summary>
     public static void Reset()
     {
         var old = _shared;
+        var oldScrape = _scrape;
         _shared = null;
+        _scrape = null;
         _autoFallbackNote = null;
         try { old?.Dispose(); } catch { /* 忽略 */ }
+        try { oldScrape?.Dispose(); } catch { /* 忽略 */ }
     }
 
     public static HttpClient Create(bool allowInsecureCertificate = false, TimeSpan? poolLifetime = null)
         => Create(Network, allowInsecureCertificate, poolLifetime);
 
     /// <summary>显式指定网络设置的版本（自测用）。</summary>
-    public static HttpClient Create(NetworkConfig? network, bool allowInsecureCertificate = false, TimeSpan? poolLifetime = null)
+    public static HttpClient Create(
+        NetworkConfig? network,
+        bool allowInsecureCertificate = false,
+        TimeSpan? poolLifetime = null,
+        bool preferHttp11 = false)
     {
         var handler = new SocketsHttpHandler
         {
@@ -56,6 +71,23 @@ public static class HttpClients
             UseCookies = true,
             CookieContainer = new CookieContainer(),
         };
+
+        if (preferHttp11)
+        {
+            // 抓网页专用的保守 TLS 设置。实测 360 搜索（www.so.com）的服务器不接受
+            // TLS 1.3 的 ClientHello —— 协商直接断流（Received an unexpected EOF），
+            // 而 .NET 8 在 Win11 上默认就会用 1.3，于是「证书校验没通过」。curl 能抓
+            // 到是因为它协商的是 1.2。这里把协议压到 1.2 就正常了。
+            handler.SslOptions.EnabledSslProtocols =
+                System.Security.Authentication.SslProtocols.Tls12;
+            handler.SslOptions.ApplicationProtocols = new List<System.Net.Security.SslApplicationProtocol>
+            {
+                System.Net.Security.SslApplicationProtocol.Http11,
+            };
+            // 部分站点的证书吊销列表（CRL/OCSP）在国内网络下连不上，schannel 会直接判
+            // 证书无效而握手失败。抓公开搜索结果页不值得为吊销状态卡住，这里不查。
+            handler.SslOptions.CertificateRevocationCheckMode = System.Security.Cryptography.X509Certificates.X509RevocationMode.NoCheck;
+        }
 
         // 代理：direct 时显式置空，绕开系统代理。
         // 这不是小事 —— 系统代理指向一个没在跑的本地端口（比如关了代理软件但注册表还留着

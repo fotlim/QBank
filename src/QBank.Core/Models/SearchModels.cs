@@ -8,6 +8,7 @@ public enum SourceKind
     LanShare,
     Ocs,
     Ai,
+    Web,
 }
 
 public static class SourceKindExtensions
@@ -19,6 +20,7 @@ public static class SourceKindExtensions
         SourceKind.LanShare => "局域网共享",
         SourceKind.Ocs => "OCS题库",
         SourceKind.Ai => "AI模型",
+        SourceKind.Web => "网页搜索",
         _ => "未知",
     };
 }
@@ -45,6 +47,9 @@ public sealed class SearchRequest
     public bool UseLanShare { get; set; } = true;
     public bool UseOcs { get; set; } = true;
     public bool UseAi { get; set; } = true;
+
+    /// <summary>用搜索引擎在网页里找答案（可信命中时可不调 AI）。</summary>
+    public bool UseWeb { get; set; } = true;
 
     /// <summary>只使用这些来源（按 Id 过滤）；为空表示全部启用来源。</summary>
     public List<string> OnlySourceIds { get; set; } = new();

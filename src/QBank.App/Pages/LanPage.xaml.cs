@@ -112,6 +112,9 @@ public sealed partial class LanPage : Page
             info.Children.Add(new TextBlock { Text = p.DisplayName, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
             var detail = $"上次见到：{(p.LastSeenAt is null ? "从未" : p.LastSeenAt.Value.ToLocalTime().ToString("MM-dd HH:mm"))}";
             if (p.QuestionCount > 0) detail += $" · 约 {p.QuestionCount} 道题";
+            detail += p.LastSyncAt is null
+                ? " · 还没同步过"
+                : $" · 上次同步 {p.LastSyncAt.Value.ToLocalTime():MM-dd HH:mm}（{p.LastSyncCount} 道）";
             info.Children.Add(new TextBlock
             {
                 Text = detail,
@@ -268,7 +271,8 @@ public sealed partial class LanPage : Page
 
     private async void OnPullAll(object sender, RoutedEventArgs e)
     {
-        SyncStatus.Text = "正在拉取…";
+        var incremental = IncrementalBox.IsChecked == true;
+        SyncStatus.Text = incremental ? "正在增量拉取…" : "正在全量拉取…";
         try
         {
             var peers = AppServices.Current.Config.Config.LanPeers.Where(p => p.Enabled).ToList();
@@ -279,20 +283,31 @@ public sealed partial class LanPage : Page
             }
 
             var total = 0;
+            var lines = new List<string>();
             foreach (var peer in peers)
             {
-                using var client = new LanBankClient(peer);
-                var json = await client.ExportAsync();
-                if (string.IsNullOrWhiteSpace(json)) continue;
-                var result = AppServices.Current.Bank.Import(json, "json");
-                total += result.Added + result.Updated;
+                var result = await AppServices.Current.Lan.PullFromAsync(peer, incremental);
+                total += result.Imported;
+                lines.Add(result.Describe());
             }
 
-            SyncStatus.Text = $"拉取完成：合计导入 {total} 道题";
+            AppServices.Current.SaveConfig();
+            RebuildPeerList();
+            SyncStatus.Text = $"拉取完成：合计导入 {total} 道题\n· " + string.Join("\n· ", lines);
         }
         catch (Exception ex)
         {
             SyncStatus.Text = "拉取失败：" + ex.Message;
         }
+    }
+
+    private void OnForgetSync(object sender, RoutedEventArgs e)
+    {
+        var count = AppServices.Current.Lan.ForgetSyncHistory();
+        AppServices.Current.SaveConfig();
+        RebuildPeerList();
+        SyncStatus.Text = count == 0
+            ? "本来就没有同步记录，下次拉取仍按节点上的全部题目。"
+            : $"已清掉 {count} 个节点的同步记录，下次拉取会是全量。";
     }
 }

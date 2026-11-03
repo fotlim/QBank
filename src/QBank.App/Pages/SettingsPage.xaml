@@ -139,6 +139,72 @@
 
                 <!-- 2 | 题库来源：别人的题库搬进来，自己的题库给出去 -->
                 <StackPanel x:Name="GroupSources" Spacing="16" Visibility="Collapsed">
+                    <!-- 网页搜索（免费来源） -->
+                    <Border x:Name="WebSearchCard" Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="12">
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="网页搜索 · 不用花钱的答案来源" Style="{StaticResource SectionTitle}" Margin="0" />
+                                <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                           Text="先拿题干去搜索引擎搜一圈，从结果页里找答案。把握够就直接用，不再花 token 问模型 —— 没有模型也能用。" />
+                            </StackPanel>
+
+                            <CheckBox x:Name="WebEnableBox" Content="启用网页搜索"
+                                      Checked="OnWebOptionChanged" Unchecked="OnWebOptionChanged" />
+
+                            <Grid ColumnSpacing="12" RowSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <StackPanel Grid.Row="0" Grid.Column="0" Spacing="4">
+                                    <TextBlock Text="搜索引擎" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox x:Name="WebEngineBox" HorizontalAlignment="Stretch"
+                                              SelectionChanged="OnWebEngineChanged" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="0" Grid.Column="1" Spacing="4">
+                                    <TextBlock Text="最多看几条结果" Style="{StaticResource FieldLabel}" />
+                                    <NumberBox x:Name="WebMaxBox" Minimum="1" Maximum="20" SmallChange="1"
+                                               SpinButtonPlacementMode="Compact" HorizontalAlignment="Stretch" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="0" Grid.Column="2" Spacing="4">
+                                    <TextBlock Text="可信线（低于它不用）" Style="{StaticResource FieldLabel}" />
+                                    <NumberBox x:Name="WebMinScoreBox" Minimum="0.3" Maximum="1" SmallChange="0.05"
+                                               SpinButtonPlacementMode="Compact" HorizontalAlignment="Stretch" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="1" Grid.Column="0" Spacing="4">
+                                    <TextBlock Text="题干截多少字去搜" Style="{StaticResource FieldLabel}" />
+                                    <NumberBox x:Name="WebQueryCharsBox" Minimum="8" Maximum="120" SmallChange="4"
+                                               SpinButtonPlacementMode="Compact" HorizontalAlignment="Stretch" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
+                                    <TextBlock Text="超时（秒）" Style="{StaticResource FieldLabel}" />
+                                    <NumberBox x:Name="WebTimeoutBox" Minimum="3" Maximum="60" SmallChange="1"
+                                               SpinButtonPlacementMode="Compact" HorizontalAlignment="Stretch" />
+                                </StackPanel>
+                                <StackPanel Grid.Row="1" Grid.Column="2" Spacing="4" VerticalAlignment="Bottom">
+                                    <CheckBox x:Name="WebSkipAiBox" Content="网页命中就不问模型" />
+                                    <CheckBox x:Name="WebWithOptionsBox" Content="查询词带上选项" Margin="0,4,0,0" />
+                                </StackPanel>
+                            </Grid>
+
+                            <TextBox x:Name="WebCustomBox" Visibility="Collapsed"
+                                     PlaceholderText="自定义搜索地址模板，用 {q} 代表查询词，例如 https://example.com/search?q={q}" />
+
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Button x:Name="WebTestButton" Content="拿示例题试一条" Click="OnTestWebSearch" />
+                                <TextBlock x:Name="WebStatusText" Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
                     <!-- 在线题库 -->
                     <Border x:Name="OcsListCard" Style="{StaticResource CardBorder}">
                         <StackPanel Spacing="12">
@@ -294,6 +360,45 @@
 
                 <!-- 4 | 使用偏好：搜题行为与窗口 -->
                 <StackPanel x:Name="GroupPrefs" Spacing="16" Visibility="Collapsed">
+                    <!-- 自动标签 -->
+                    <Border x:Name="AutoTagCard" Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="12">
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="自动标签" Style="{StaticResource SectionTitle}" Margin="0" />
+                                <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                           Text="给题库里的题目自动打分类标签（学科、题型、特征）。默认用内置词表判断：离线、零成本、不花 token；也可以交给模型判断，更灵活。" />
+                            </StackPanel>
+
+                            <CheckBox x:Name="AutoTagEnableBox" Content="启用自动标签" />
+                            <CheckBox x:Name="AutoTagOverwriteBox" Content="已有标签的题目也重新打一遍" />
+
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Spacing="4">
+                                    <TextBlock Text="判断方式" Style="{StaticResource FieldLabel}" />
+                                    <ComboBox x:Name="AutoTagEngineBox" HorizontalAlignment="Stretch"
+                                              SelectionChanged="OnAutoTagEngineChanged" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Spacing="4">
+                                    <TextBlock Text="每题最多几个标签" Style="{StaticResource FieldLabel}" />
+                                    <NumberBox x:Name="AutoTagMaxBox" Minimum="1" Maximum="10" SmallChange="1"
+                                               SpinButtonPlacementMode="Compact" HorizontalAlignment="Stretch" />
+                                </StackPanel>
+                            </Grid>
+
+                            <ComboBox x:Name="AutoTagProviderBox" HorizontalAlignment="Stretch" Visibility="Collapsed" />
+
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Button x:Name="AutoTagButton" Content="给没标签的题目打一批" Click="OnAutoTagBatch" />
+                                <TextBlock x:Name="AutoTagStatusText" Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
                     <!-- 搜题选项 -->
                     <Border x:Name="SearchOptionsCard" Style="{StaticResource CardBorder}">
                         <StackPanel Spacing="12">

@@ -94,11 +94,19 @@ public sealed class LanBankClient : IDisposable
         return response.IsSuccessStatusCode;
     }
 
-    public async Task<string?> ExportAsync(CancellationToken ct = default)
+    /// <summary>拉取远端题库；传 since 就只拉那之后改动过的题目（增量同步）。</summary>
+    public async Task<string?> ExportAsync(DateTimeOffset? since = null, int limit = 0, CancellationToken ct = default)
     {
-        var url = $"{BaseUrl}/qbank/export";
+        var parameters = new List<string>();
         if (!string.IsNullOrWhiteSpace(_peer.Token))
-            url += "?token=" + Uri.EscapeDataString(_peer.Token!);
+            parameters.Add("token=" + Uri.EscapeDataString(_peer.Token!));
+        if (since is not null)
+            parameters.Add("since=" + Uri.EscapeDataString(since.Value.ToString("O")));
+        if (limit > 0)
+            parameters.Add("limit=" + limit.ToString());
+
+        var url = $"{BaseUrl}/qbank/export";
+        if (parameters.Count > 0) url += "?" + string.Join("&", parameters);
 
         using var response = await _http.GetAsync(url, ct);
         if (!response.IsSuccessStatusCode) return null;

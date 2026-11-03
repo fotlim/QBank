@@ -80,10 +80,12 @@
                 <StackPanel Spacing="12">
                     <TextBlock Text="题库同步" Style="{StaticResource SectionTitle}" Margin="0" />
                     <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
-                               Text="把你的题目推送到其它节点（对方需要允许远端写入），或者把别人的题库拉过来合并。" />
+                               Text="把你的题目推送到其它节点（对方需要允许远端写入），或者把别人的题库拉过来合并。拉取默认走增量：只取对方上次同步之后改动过的题目。" />
+                    <CheckBox x:Name="IncrementalBox" Content="只拉上次同步之后改动的题目（增量）" IsChecked="True" />
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <Button Content="推送本地题目到所有节点" Click="OnPushAll" />
                         <Button Content="从所有节点拉取题库" Click="OnPullAll" />
+                        <Button Content="忘了同步记录（下次全量）" Click="OnForgetSync" />
                     </StackPanel>
                     <TextBlock x:Name="SyncStatus" Style="{StaticResource Subtle}" TextWrapping="Wrap" />
                 </StackPanel>

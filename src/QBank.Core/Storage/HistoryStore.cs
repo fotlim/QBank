@@ -156,24 +156,7 @@ public sealed class HistoryStore
     {
         var sql = new System.Text.StringBuilder("SELECT id, title, options, type, answer, source_name, source_kind, score, elapsed_ms, success, error, created_at, saved_to_bank FROM search_history WHERE 1=1");
         var ps = new List<(string, object?)>();
-
-        if (!string.IsNullOrWhiteSpace(keyword))
-        {
-            sql.Append(" AND (title LIKE @kw OR IFNULL(answer,'') LIKE @kw)");
-            ps.Add(("@kw", "%" + keyword!.Trim() + "%"));
-        }
-        if (!string.IsNullOrWhiteSpace(sourceKind))
-        {
-            sql.Append(" AND source_kind = @kind");
-            ps.Add(("@kind", sourceKind!));
-        }
-        if (onlySuccess)
-            sql.Append(" AND success = 1");
-        if (from is not null)
-        {
-            sql.Append(" AND created_at >= @from");
-            ps.Add(("@from", from.Value.ToString("O", CultureInfo.InvariantCulture)));
-        }
+        AppendFilters(sql, ps, keyword, sourceKind, onlySuccess, from);
 
         sql.Append(" ORDER BY created_at DESC, id DESC LIMIT @limit OFFSET @offset");
         ps.Add(("@limit", limit));
@@ -202,6 +185,48 @@ public sealed class HistoryStore
             });
         }
         return list;
+    }
+
+    /// <summary>和 Query 用同一套筛选条件，只算总数（分页用）。</summary>
+    public int Count(
+        string? keyword = null,
+        string? sourceKind = null,
+        bool onlySuccess = false,
+        DateTimeOffset? from = null)
+    {
+        var sql = new System.Text.StringBuilder("SELECT COUNT(*) FROM search_history WHERE 1=1");
+        var ps = new List<(string, object?)>();
+        AppendFilters(sql, ps, keyword, sourceKind, onlySuccess, from);
+
+        using var c = Open();
+        return Convert.ToInt32(Scalar(c, sql.ToString(), ps.ToArray()) ?? 0);
+    }
+
+    private static void AppendFilters(
+        System.Text.StringBuilder sql,
+        List<(string, object?)> ps,
+        string? keyword,
+        string? sourceKind,
+        bool onlySuccess,
+        DateTimeOffset? from)
+    {
+        if (!string.IsNullOrWhiteSpace(keyword))
+        {
+            sql.Append(" AND (title LIKE @kw OR IFNULL(answer,'') LIKE @kw)");
+            ps.Add(("@kw", "%" + keyword!.Trim() + "%"));
+        }
+        if (!string.IsNullOrWhiteSpace(sourceKind))
+        {
+            sql.Append(" AND source_kind = @kind");
+            ps.Add(("@kind", sourceKind!));
+        }
+        if (onlySuccess)
+            sql.Append(" AND success = 1");
+        if (from is not null)
+        {
+            sql.Append(" AND created_at >= @from");
+            ps.Add(("@from", from.Value.ToString("O", CultureInfo.InvariantCulture)));
+        }
     }
 
     public HistoryStats Stats()

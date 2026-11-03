@@ -153,6 +153,80 @@ public sealed class LocalBank
         return added;
     }
 
+    /// <summary>收藏用的固定标签（不改表结构，靠标签表达）。</summary>
+    public const string FavoriteTag = "★收藏";
+
+    /// <summary>按 id 改一条题目。改题干或题型会重算指纹；和别的题撞指纹时返回 false。</summary>
+    public bool Update(Question question)
+    {
+        if (question.Id <= 0) return false;
+        question.Recompute();
+
+        using var c = Open();
+        try
+        {
+            var rows = Exec(c, """
+                UPDATE questions SET
+                    title = @title, norm_title = @norm, norm_prefix = @prefix, type = @type,
+                    options = @options, answer = @answer, extra_json = @extra, source = @source,
+                    tags = @tags, updated_at = @updated, fingerprint = @fp
+                WHERE id = @id;
+                """,
+                ("@title", question.Title ?? string.Empty),
+                ("@norm", question.NormalizedTitle),
+                ("@prefix", question.NormalizedPrefix),
+                ("@type", question.Type.ToOcs()),
+                ("@options", question.Options ?? string.Empty),
+                ("@answer", question.Answer ?? string.Empty),
+                ("@extra", (object?)question.ExtraJson),
+                ("@source", (object?)question.Source),
+                ("@tags", (object?)question.Tags),
+                ("@updated", Iso(DateTimeOffset.Now)),
+                ("@fp", question.Fingerprint),
+                ("@id", question.Id));
+
+            return rows > 0;
+        }
+        catch (SqliteException)
+        {
+            // 指纹和另一条题撞了（改了题干/题型后跟已有的重复）
+            return false;
+        }
+    }
+
+    /// <summary>批量写回标签（自动打标用，不动其它字段）。</summary>
+    public int SaveTags(IEnumerable<Question> questions)
+    {
+        var list = questions.Where(q => q.Id > 0).ToList();
+        if (list.Count == 0) return 0;
+
+        using var c = Open();
+        using var tx = c.BeginTransaction();
+        var now = Iso(DateTimeOffset.Now);
+        var count = 0;
+
+        foreach (var q in list)
+        {
+            using var cmd = BuildCommand(c,
+                "UPDATE questions SET tags = @tags, updated_at = @now WHERE id = @id",
+                ("@tags", (object?)q.Tags), ("@now", now), ("@id", q.Id));
+            cmd.Transaction = tx;
+            count += cmd.ExecuteNonQuery();
+        }
+
+        tx.Commit();
+        return count;
+    }
+
+    /// <summary>按 id 只改答案（补答案、改答案用）。</summary>
+    public bool SetAnswer(long id, string answer)
+    {
+        if (id <= 0) return false;
+        using var c = Open();
+        return Exec(c, "UPDATE questions SET answer = @answer, updated_at = @now WHERE id = @id",
+            ("@answer", answer ?? string.Empty), ("@now", Iso(DateTimeOffset.Now)), ("@id", id)) > 0;
+    }
+
     public void RegisterHit(long id)
     {
         using var c = Open();
@@ -202,7 +276,7 @@ public sealed class LocalBank
         return reader.Read() ? Map(reader.Reader) : null;
     }
 
-    public List<Question> Query(string? keyword, QuestionType? type, int offset, int limit, string order = "updated")
+    public List<Question> Query(string? keyword, QuestionType? type, int offset, int limit, string order = "updated", string? tag = null)
     {
         var sql = new StringBuilder($"SELECT {SelectColumns} FROM questions WHERE 1=1");
         var ps = new List<(string, object?)>();
@@ -216,6 +290,11 @@ public sealed class LocalBank
         {
             sql.Append(" AND type = @type");
             ps.Add(("@type", type.Value.ToOcs()));
+        }
+        if (!string.IsNullOrWhiteSpace(tag))
+        {
+            sql.Append(" AND (' ' || IFNULL(tags,'') || ' ') LIKE @tag");
+            ps.Add(("@tag", "% " + tag!.Trim() + " %"));
         }
 
         sql.Append(order switch
@@ -241,7 +320,7 @@ public sealed class LocalBank
         return list;
     }
 
-    public int Count(string? keyword = null, QuestionType? type = null)
+    public int Count(string? keyword = null, QuestionType? type = null, string? tag = null)
     {
         var sql = new StringBuilder("SELECT COUNT(*) FROM questions WHERE 1=1");
         var ps = new List<(string, object?)>();
@@ -254,6 +333,11 @@ public sealed class LocalBank
         {
             sql.Append(" AND type = @type");
             ps.Add(("@type", type.Value.ToOcs()));
+        }
+        if (!string.IsNullOrWhiteSpace(tag))
+        {
+            sql.Append(" AND (' ' || IFNULL(tags,'') || ' ') LIKE @tag");
+            ps.Add(("@tag", "% " + tag!.Trim() + " %"));
         }
 
         using var c = Open();
@@ -368,11 +452,84 @@ public sealed class LocalBank
         return set.ToList();
     }
 
+    /// <summary>标签及各自的题目数，按题数倒序（题库页的标签筛选用）。</summary>
+    public List<(string Tag, int Count)> TagStats(int max = 300)
+    {
+        using var c = Open();
+        using var reader = Query(c, "SELECT tags FROM questions WHERE tags IS NOT NULL AND tags <> ''");
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        while (reader.Read())
+        {
+            foreach (var raw in reader.Reader.GetString(0).Split(new[] { ' ', ',', '，', ';', '；' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var tag = raw.Trim();
+                if (tag.Length == 0) continue;
+                counts[tag] = counts.GetValueOrDefault(tag) + 1;
+            }
+        }
+
+        return counts
+            .OrderByDescending(kv => kv.Value)
+            .ThenBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(Math.Max(max, 1))
+            .Select(kv => (kv.Key, kv.Value))
+            .ToList();
+    }
+
+    /// <summary>还没打标签的题目（自动打标用）。</summary>
+    public List<Question> QueryUntagged(int limit = 200)
+    {
+        using var c = Open();
+        return ReadAll(c,
+            $"SELECT {SelectColumns} FROM questions WHERE tags IS NULL OR tags = '' ORDER BY updated_at DESC LIMIT @limit",
+            ("@limit", Math.Max(limit, 1)));
+    }
+
+    /// <summary>按标签筛题目（包含匹配，用于「只看某个标签」）。</summary>
+    public List<Question> QueryByTag(string tag, int limit = 500)
+    {
+        if (string.IsNullOrWhiteSpace(tag)) return new List<Question>();
+        using var c = Open();
+        return ReadAll(c,
+            $"SELECT {SelectColumns} FROM questions WHERE IFNULL(tags,'') LIKE @tag ORDER BY updated_at DESC LIMIT @limit",
+            ("@tag", "%" + tag.Trim() + "%"), ("@limit", Math.Max(limit, 1)));
+    }
+
+    // ---------------- 增量同步 ----------------
+
+    /// <summary>取 updated_at 不早于 since 的题目（since 为 null 表示全量）。</summary>
+    public List<Question> QueryUpdatedSince(DateTimeOffset? since, int limit = 0, int offset = 0)
+    {
+        using var c = Open();
+        var take = limit <= 0 ? int.MaxValue : limit;
+
+        if (since is null)
+            return ReadAll(c,
+                $"SELECT {SelectColumns} FROM questions ORDER BY updated_at ASC, id ASC LIMIT @limit OFFSET @offset",
+                ("@limit", take), ("@offset", offset));
+
+        return ReadAll(c,
+            $"SELECT {SelectColumns} FROM questions WHERE updated_at >= @since ORDER BY updated_at ASC, id ASC LIMIT @limit OFFSET @offset",
+            ("@since", Iso(since.Value)), ("@limit", take), ("@offset", offset));
+    }
+
+    public int CountUpdatedSince(DateTimeOffset? since)
+    {
+        using var c = Open();
+        return since is null
+            ? Convert.ToInt32(Scalar(c, "SELECT COUNT(*) FROM questions") ?? 0)
+            : Convert.ToInt32(Scalar(c, "SELECT COUNT(*) FROM questions WHERE updated_at >= @since",
+                ("@since", Iso(since.Value))) ?? 0);
+    }
+
     // ---------------- 导入导出 ----------------
 
-    public string ExportJson()
+    public string ExportJson() => ExportJson(null, 0);
+
+    /// <summary>导出 JSON。since 非空时只导出该时间之后变动过的题目（增量同步用）。</summary>
+    public string ExportJson(DateTimeOffset? since, int limit = 0)
     {
-        var list = Query(null, null, 0, int.MaxValue, "id").Select(q => new
+        var list = QueryUpdatedSince(since, limit).Select(q => new
         {
             title = q.Title,
             type = q.Type.ToOcs(),
@@ -383,8 +540,18 @@ public sealed class LocalBank
             hitCount = q.HitCount,
             createdAt = Iso(q.CreatedAt),
             updatedAt = Iso(q.UpdatedAt),
-        });
-        return JsonSerializer.Serialize(new { app = "QBank", version = 1, exportedAt = Iso(DateTimeOffset.Now), questions = list },
+        }).ToList();
+
+        return JsonSerializer.Serialize(new
+        {
+            app = "QBank",
+            version = 1,
+            incremental = since is not null,
+            since = since is null ? null : Iso(since.Value),
+            exportedAt = Iso(DateTimeOffset.Now),
+            count = list.Count,
+            questions = list,
+        },
             new JsonSerializerOptions
             {
                 WriteIndented = true,

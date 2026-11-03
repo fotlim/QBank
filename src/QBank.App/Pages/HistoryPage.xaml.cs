@@ -18,31 +18,43 @@ public sealed class HistoryRow
 public sealed partial class HistoryPage : Page
 {
     private readonly ObservableCollection<HistoryRow> _rows = new();
+    private int _page;
+    private int _pageSize = 50;
+    private int _total;
 
     public HistoryPage()
     {
         InitializeComponent();
         HistoryList.ItemsSource = _rows;
+        PageSizeBox.SelectedIndex = 0;
         Loaded += OnLoaded;
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e) => Refresh();
 
-    private void Refresh()
+    private void Refresh(bool resetPage = false)
     {
         try
         {
+            if (resetPage) _page = 0;
+
             var keyword = string.IsNullOrWhiteSpace(SearchBox.Text) ? null : SearchBox.Text.Trim();
             var kind = (KindFilter.SelectedItem as ComboBoxItem)?.Tag as string;
             if (string.IsNullOrWhiteSpace(kind)) kind = null;
+            var onlySuccess = OnlySuccess.IsChecked == true;
+
+            _total = AppServices.Current.History.Count(keyword, kind, onlySuccess);
+            var pageCount = Math.Max(1, (_total + _pageSize - 1) / _pageSize);
+            if (_page > pageCount - 1) _page = pageCount - 1;
+            if (_page < 0) _page = 0;
 
             var items = AppServices.Current.History.Query(
                 keyword: keyword,
                 sourceKind: kind,
-                onlySuccess: OnlySuccess.IsChecked == true,
+                onlySuccess: onlySuccess,
                 from: null,
-                offset: 0,
-                limit: 300);
+                offset: _page * _pageSize,
+                limit: _pageSize);
 
             _rows.Clear();
             foreach (var record in items)
@@ -62,6 +74,12 @@ public sealed partial class HistoryPage : Page
             var stats = AppServices.Current.History.Stats();
             HistoryStatsText.Text = $"共 {stats.Total} 条 · 今日 {stats.Today} · 近七天 {stats.Week} · " +
                                     $"成功率 {stats.SuccessRate:F1}% · 平均 {stats.AvgElapsedMs}ms";
+            PageText.Text = _total == 0
+                ? "没有符合条件的记录"
+                : $"筛选出 {_total} 条 · 第 {_page + 1} / {pageCount} 页";
+            FirstPageButton.IsEnabled = _page > 0;
+            PrevPageButton.IsEnabled = _page > 0;
+            NextPageButton.IsEnabled = _page < pageCount - 1;
             EmptyHint.Visibility = _rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         catch (Exception ex)
@@ -71,18 +89,43 @@ public sealed partial class HistoryPage : Page
         }
     }
 
-    private void OnSearchChanged(object sender, TextChangedEventArgs e) => Refresh();
+    private void OnSearchChanged(object sender, TextChangedEventArgs e) => Refresh(resetPage: true);
+
+    private void OnPageSizeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded || PageSizeBox.SelectedItem is not ComboBoxItem item) return;
+        if (int.TryParse(item.Tag as string, out var size) && size > 0) _pageSize = size;
+        Refresh(resetPage: true);
+    }
+
+    private void OnFirstPage(object sender, RoutedEventArgs e)
+    {
+        _page = 0;
+        Refresh();
+    }
+
+    private void OnPrevPage(object sender, RoutedEventArgs e)
+    {
+        if (_page > 0) _page--;
+        Refresh();
+    }
+
+    private void OnNextPage(object sender, RoutedEventArgs e)
+    {
+        _page++;
+        Refresh();
+    }
 
     private void OnFilterChanged(object sender, RoutedEventArgs e)
     {
         if (!IsLoaded) return;
-        Refresh();
+        Refresh(resetPage: true);
     }
 
     private void OnFilterChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!IsLoaded) return;
-        Refresh();
+        Refresh(resetPage: true);
     }
 
     private void OnRefresh(object sender, RoutedEventArgs e) => Refresh();

@@ -8,8 +8,9 @@ using QBank.Core.Storage;
 namespace QBank.Core.Search;
 
 /// <summary>
-/// 搜题总编排：缓存 → 本地题库 → 局域网 → OCS 题库 → AI 模型，最后统一打分排序。
+/// 搜题总编排：缓存 → 本地题库 → 局域网 → 在线题库 → 网页搜索 → AI 模型，最后统一打分排序。
 /// 各来源并发执行，单个来源失败不影响其它来源。
+/// 开了「网页命中就跳过 AI」时，会先等网页和其它免费来源跑完，网页给出可信答案就不再调模型（省 token）。
 /// </summary>
 public sealed class SearchService
 {
@@ -19,6 +20,7 @@ public sealed class SearchService
     private readonly LanShareService _lan;
     private readonly AiChatClient _ai;
     private readonly AnswerWrapperHandler _ocs;
+    private readonly WebSearchSource _web;
 
     public SearchService(
         ConfigStore configStore,
@@ -26,7 +28,8 @@ public sealed class SearchService
         HistoryStore history,
         LanShareService? lan = null,
         AiChatClient? ai = null,
-        AnswerWrapperHandler? ocs = null)
+        AnswerWrapperHandler? ocs = null,
+        WebSearchSource? web = null)
     {
         _configStore = configStore;
         _bank = bank;
@@ -34,6 +37,7 @@ public sealed class SearchService
         _lan = lan ?? new LanShareService(bank);
         _ai = ai ?? new AiChatClient();
         _ocs = ocs ?? new AnswerWrapperHandler();
+        _web = web ?? new WebSearchSource();
     }
 
     public AppConfig Config => _configStore.Config;
@@ -84,6 +88,7 @@ public sealed class SearchService
         }
 
         // 2) 并发收集各来源
+        var completed = new List<SourceOutcome>();
         var tasks = new List<Task<SourceOutcome>>();
 
         if (request.UseLocalBank && cfg.Search.UseLocalBank && cfg.LocalBank.Enabled)
@@ -95,25 +100,62 @@ public sealed class SearchService
         if (request.UseOcs && cfg.Search.UseOcs && cfg.OcsSources.Count > 0)
             tasks.Add(Task.Run(() => SearchOcsAsync(request, cfg, ct), ct));
 
-        if (request.UseAi && cfg.Search.UseAi)
-            tasks.Add(Task.Run(() => SearchAiAsync(request, cfg, ct), ct));
+        var useWeb = request.UseWeb && cfg.Search.UseWeb && cfg.WebSearch.Enabled
+            && WebSearchEngines.IsUsable(cfg.WebSearch.Engine, cfg.WebSearch.CustomUrlTemplate);
+        var webTask = useWeb ? Task.Run(() => _web.SearchAsync(request, cfg, ct), ct) : null;
+        if (webTask is not null) tasks.Add(webTask);
 
-        if (tasks.Count == 0)
+        var useAi = request.UseAi && cfg.Search.UseAi;
+
+        // 开了「网页命中就跳过 AI」：先等免费来源（含网页）跑完再决定要不要调模型
+        if (useAi && webTask is not null && cfg.WebSearch.SkipAiOnHit)
         {
-            response.Outcomes.Add(new SourceOutcome
+            completed.AddRange(await Task.WhenAll(tasks).ConfigureAwait(false));
+            tasks.Clear();
+
+            var webOutcome = completed.FirstOrDefault(o => o.Kind == SourceKind.Web);
+            var confident = webOutcome is { Ok: true }
+                && webOutcome.Hits.Any(h => h.Score >= cfg.WebSearch.MinScore);
+
+            if (confident)
             {
-                SourceId = "none",
-                SourceName = "来源",
-                Kind = SourceKind.Cache,
-                Ok = false,
-                Error = "没有启用任何题目来源，请到设置里开启至少一个",
-            });
-            response.ElapsedMs = sw.ElapsedMilliseconds;
-            LastResponse = response;
-            return response;
+                var skipped = new SourceOutcome
+                {
+                    SourceId = "ai",
+                    SourceName = "AI 模型",
+                    Kind = SourceKind.Ai,
+                    Ok = true,
+                };
+                skipped.Notices.Add("网页已经找到可信答案，这次不调模型（省 token）。想强制走模型就把「网页命中就跳过 AI」关掉。");
+                completed.Add(skipped);
+            }
+            else
+            {
+                completed.Add(await Task.Run(() => SearchAiAsync(request, cfg, ct), ct).ConfigureAwait(false));
+            }
+        }
+        else
+        {
+            if (useAi) tasks.Add(Task.Run(() => SearchAiAsync(request, cfg, ct), ct));
+
+            if (tasks.Count == 0)
+            {
+                response.Outcomes.Add(new SourceOutcome
+                {
+                    SourceId = "none",
+                    SourceName = "来源",
+                    Kind = SourceKind.Cache,
+                    Ok = false,
+                    Error = "没有启用任何题目来源，请到设置里开启至少一个",
+                });
+                response.ElapsedMs = sw.ElapsedMilliseconds;
+                LastResponse = response;
+                return response;
+            }
+
+            completed.AddRange(await Task.WhenAll(tasks).ConfigureAwait(false));
         }
 
-        var completed = await Task.WhenAll(tasks).ConfigureAwait(false);
         foreach (var outcome in completed)
         {
             response.Outcomes.Add(outcome);

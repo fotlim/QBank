@@ -69,6 +69,55 @@ public static class ScreenCapture
         return CaptureRegion(rect.Left, rect.Top, width, height);
     }
 
+    /// <summary>虚拟屏幕（全部显示器合并）的像素范围。多显示器时 X/Y 可能是负数。</summary>
+    public static (int X, int Y, int Width, int Height) VirtualScreenBounds()
+    {
+        var x = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        var y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        var width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        var height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        if (width <= 0 || height <= 0)
+        {
+            width = GetSystemMetrics(SM_CXSCREEN);
+            height = GetSystemMetrics(SM_CYSCREEN);
+            x = 0;
+            y = 0;
+        }
+        return (x, y, width, height);
+    }
+
+    /// <summary>从已有图片里裁一块（坐标是图片内部像素坐标，越界自动夹到边界）。用于框选截图。</summary>
+    public static byte[]? CropRegion(byte[] imageBytes, int x, int y, int width, int height)
+    {
+        if (imageBytes is null || imageBytes.Length == 0) return null;
+        if (width <= 0 || height <= 0) return null;
+
+        try
+        {
+            using var source = new MemoryStream(imageBytes);
+            using var bitmap = new Bitmap(source);
+            x = Math.Clamp(x, 0, Math.Max(0, bitmap.Width - 1));
+            y = Math.Clamp(y, 0, Math.Max(0, bitmap.Height - 1));
+            width = Math.Min(width, bitmap.Width - x);
+            height = Math.Min(height, bitmap.Height - y);
+            if (width <= 0 || height <= 0) return null;
+
+            using var cropped = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+            using (var graphics = Graphics.FromImage(cropped))
+            {
+                graphics.DrawImage(bitmap, new Rectangle(0, 0, width, height), new Rectangle(x, y, width, height), GraphicsUnit.Pixel);
+            }
+
+            using var memory = new MemoryStream();
+            cropped.Save(memory, ImageFormat.Png);
+            return memory.ToArray();
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     /// <summary>截取指定矩形区域并编码成 PNG。返回 null 表示失败。</summary>
     public static byte[]? CaptureRegion(int x, int y, int width, int height)
     {

@@ -60,6 +60,24 @@ public sealed class LanDiscoveredPeer
     public string DisplayName => string.IsNullOrWhiteSpace(Info.Name) ? Host : $"{Info.Name} ({Host})";
 }
 
+/// <summary>从某个节点拉题库的结果。</summary>
+public sealed class LanPullResult
+{
+    public string PeerName { get; set; } = string.Empty;
+    public bool Incremental { get; set; }
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public int Added { get; set; }
+    public int Updated { get; set; }
+    public int Skipped { get; set; }
+
+    public int Imported => Added + Updated;
+
+    public string Describe() => Ok
+        ? $"{PeerName}：新增 {Added}、更新 {Updated}" + (Incremental ? "（增量）" : "（全量）")
+        : $"{PeerName}：{(string.IsNullOrWhiteSpace(Error) ? "失败" : Error)}";
+}
+
 /// <summary>题目与局域网传输结构互转。</summary>
 public static class LanQuestionMapper
 {

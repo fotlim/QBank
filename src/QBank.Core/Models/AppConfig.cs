@@ -42,6 +42,12 @@ public sealed class AppConfig
     /// <summary>首次使用引导的状态。</summary>
     public OnboardingConfig Onboarding { get; set; } = new();
 
+    /// <summary>网页搜索（搜索引擎直连，命中可信答案时可省掉 AI 调用）。</summary>
+    public WebSearchConfig WebSearch { get; set; } = new();
+
+    /// <summary>自动标签分类。</summary>
+    public AutoTagConfig AutoTag { get; set; } = new();
+
     /// <summary>首次运行写入演示与预设。</summary>
     public static AppConfig CreateDefault()
     {
@@ -94,6 +100,9 @@ public sealed class SearchOptions
     public bool UseLanShare { get; set; } = true;
     public bool UseOcs { get; set; } = true;
     public bool UseAi { get; set; } = true;
+
+    /// <summary>用搜索引擎在网页里找答案（命中可信答案时可跳过 AI，省 token）。</summary>
+    public bool UseWeb { get; set; } = true;
 
     /// <summary>缓存直接命中的相似度阈值（0~1）。</summary>
     public double CacheMinScore { get; set; } = 0.72;
@@ -251,6 +260,12 @@ public sealed class LanPeerConfig
     public int QuestionCount { get; set; }
     public string? Version { get; set; }
 
+    /// <summary>上次从这台机器同步（拉或推）成功的时间；增量同步用它当 since。</summary>
+    public DateTimeOffset? LastSyncAt { get; set; }
+
+    /// <summary>上次增量同步拉回/推出的题目数，仅供界面显示。</summary>
+    public int LastSyncCount { get; set; }
+
     public string BaseUrl => $"http://{Host}:{Port}";
     public string DisplayName => $"{Name} ({Host}:{Port})";
 }
@@ -292,6 +307,9 @@ public sealed class AiProviderConfig
 
     /// <summary>该模型支持图片输入（可用于 OCR）。</summary>
     public bool VisionCapable { get; set; }
+
+    /// <summary>复制一份（字段都是值类型/不可变字符串，浅拷贝够用）。</summary>
+    public AiProviderConfig Clone() => (AiProviderConfig)MemberwiseClone();
 
     public string DisplayName => string.IsNullOrWhiteSpace(Name) ? ProviderKind : Name;
 
@@ -597,4 +615,88 @@ public sealed class OnboardingConfig
 
     /// <summary>走完引导的时间。</summary>
     public DateTime? DoneAt { get; set; }
+}
+
+
+/// <summary>网页搜索（用搜索引擎在网页里找答案）。</summary>
+public sealed class WebSearchConfig
+{
+    /// <summary>总开关。</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>搜索引擎：bing / sogou / baidu / custom。</summary>
+    public string Engine { get; set; } = "so360";
+
+    /// <summary>自定义搜索引擎的地址模板，用 {q} 表示查询词。</summary>
+    public string CustomUrlTemplate { get; set; } = "";
+
+    /// <summary>抓取多少条搜索结果来判分。</summary>
+    public int MaxResults { get; set; } = 8;
+
+    /// <summary>判定「可信答案」的最低分；低于它不算命中，也就不会跳过 AI。</summary>
+    public double MinScore { get; set; } = 0.62;
+
+    /// <summary>网页里找到可信答案后跳过 AI 调用（省 token 的关键开关）。</summary>
+    public bool SkipAiOnHit { get; set; } = true;
+
+    /// <summary>查询词最多取题干前多少字。</summary>
+    public int QueryChars { get; set; } = 48;
+
+    /// <summary>是否把选项也拼进查询词。</summary>
+    public bool QueryWithOptions { get; set; }
+
+    public int TimeoutSeconds { get; set; } = 12;
+
+    /// <summary>每条结果摘要最多取多少字参与判分。</summary>
+    public int SnippetChars { get; set; } = 600;
+
+    public string Describe()
+    {
+        if (!Enabled) return "已关闭";
+        var engine = Engine switch
+        {
+            "bing" => "必应",
+            "sogou" => "搜狗",
+            "baidu" => "百度",
+            "custom" => string.IsNullOrWhiteSpace(CustomUrlTemplate) ? "自定义（未填地址）" : "自定义",
+            _ => Engine,
+        };
+        return $"用{engine}找答案" + (SkipAiOnHit ? " · 命中后就跳过 AI" : "");
+    }
+}
+
+/// <summary>自动标签分类。</summary>
+public sealed class AutoTagConfig
+{
+    /// <summary>新增/导入题目时自动打标签。</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>打标签用的引擎：rule（本地词表，零成本）/ ai（调用模型）/ local（调用本机 Ollama）。</summary>
+    public string Engine { get; set; } = "rule";
+
+    /// <summary>ai/local 引擎用哪个服务商；留空表示用已启用的第一个。</summary>
+    public string ProviderId { get; set; } = "";
+
+    /// <summary>一道题最多几个标签。</summary>
+    public int MaxTags { get; set; } = 4;
+
+    /// <summary>已经有标签的题目是否也重新打（关掉就只补空的）。</summary>
+    public bool Overwrite { get; set; } = false;
+
+    /// <summary>自定义提示词；留空用内置的。</summary>
+    public string Prompt { get; set; } = "";
+
+    public int TimeoutSeconds { get; set; } = 30;
+
+    public string Describe()
+    {
+        if (!Enabled) return "已关闭";
+        var engine = Engine switch
+        {
+            "ai" => "用模型打标签",
+            "local" => "用本机模型打标签",
+            _ => "按词表打标签",
+        };
+        return engine + (Overwrite ? " · 覆盖已有标签" : " · 只补空标签");
+    }
 }

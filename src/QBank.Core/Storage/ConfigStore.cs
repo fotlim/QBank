@@ -265,6 +265,8 @@ public sealed class ConfigStore
         cfg.Network ??= new NetworkConfig();
         cfg.Window ??= new WindowConfig();
         cfg.Onboarding ??= new OnboardingConfig();
+        cfg.WebSearch ??= new WebSearchConfig();
+        cfg.AutoTag ??= new AutoTagConfig();
         cfg.Ocr.Umi ??= new UmiOcrConfig();
         cfg.Ocr.Custom ??= new CustomOcrConfig();
         cfg.LocalBank.AutoCacheKinds ??= new List<string> { "ai", "lan" };

@@ -6,7 +6,11 @@
     xmlns:controls="using:Microsoft.UI.Xaml.Controls"
     NavigationCacheMode="Required">
 
-    <Grid Padding="20,12,20,20" ColumnSpacing="16">
+    <Grid x:Name="RootGrid" Padding="20,12,20,20" ColumnSpacing="16"
+          AllowDrop="True" DragOver="OnPageDragOver" Drop="OnPageDrop">
+        <Grid.KeyboardAccelerators>
+            <KeyboardAccelerator Key="V" Modifiers="Control" Invoked="OnPasteAccelerator" />
+        </Grid.KeyboardAccelerators>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="420" />
             <ColumnDefinition Width="*" />
@@ -43,7 +47,9 @@
                                 </ComboBox>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Bottom" Orientation="Horizontal"
                                             Spacing="6" HorizontalAlignment="Right">
-                                    <Button x:Name="OcrShotButton" Content="截图识题" Click="OnOcrScreenshot"
+                                    <Button x:Name="OcrRegionButton" Content="框选截图" Click="OnOcrRegion"
+                                            ToolTipService.ToolTip="拉一个框，只识别框里的题目" />
+                                    <Button x:Name="OcrShotButton" Content="整屏识别" Click="OnOcrScreenshot"
                                             ToolTipService.ToolTip="截取整个屏幕并识别题目" />
                                     <Button x:Name="OcrFileButton" Content="选图片" Click="OnOcrFile"
                                             ToolTipService.ToolTip="从文件中选择题目截图" />
@@ -188,7 +194,7 @@
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
                                 <TextBlock Grid.Column="1" TextWrapping="Wrap" VerticalAlignment="Center"
-                                           Text="题目在屏幕上？点「截图识题」，或者用「选图片」找一张图，不用手敲。" />
+                                           Text="题目在屏幕上？按 Ctrl+V 直接粘贴截图，把图片拖进窗口也行，或者点「框选截图 / 整屏识别 / 选图片」。" />
                             </Grid>
 
                             <Grid ColumnSpacing="10">
