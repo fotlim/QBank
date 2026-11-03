@@ -12,8 +12,8 @@
 
 #define AppName "题库工坊"
 #define AppNameEn "QBank"
-#define AppVersion "1.0.9"
-#define AppPublisher "Escape-Lin"
+#define AppVersion "1.1.0"
+#define AppPublisher "fotlim"
 #define AppUrl "https://github.com/fotlim/QBank"
 #define AppExeName "QBank.exe"
 #define BuildDir "..\publish"

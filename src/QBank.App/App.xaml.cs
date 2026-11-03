@@ -14,6 +14,8 @@ public partial class App : Application
     public App()
     {
         Trace("App ctor 开始");
+        Trace($"身份：{AppInfo.VersionLine} · {AppInfo.Edition} · 作者 {AppInfo.Developer} · "
+            + $"由 {AppInfo.BuiltWith}（{AppInfo.BuiltWithModel}）写成");
 
         try
         {

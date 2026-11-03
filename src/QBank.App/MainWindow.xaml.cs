@@ -42,7 +42,42 @@ public sealed partial class MainWindow : Window
         Onboarding.GoToSettings += OnOnboardingGoToSettings;
         Onboarding.StartSearching += OnOnboardingStartSearching;
 
+        SetupTitleBarEgg();
         ShowOnboardingIfFirstRun();
+    }
+
+    /// <summary>
+    /// 标题栏那行小字加个提示 + 双击彩蛋：有人截图问「这软件哪来的」，
+    /// 悬停就能看到作者和仓库，双击直接翻出那条鱼。
+    /// </summary>
+    private void SetupTitleBarEgg()
+    {
+        try
+        {
+            ToolTipService.SetToolTip(TitleBarStack,
+                $"{AppInfo.VersionLine} · {AppInfo.Edition}\n"
+                + $"作者 {AppInfo.Developer} · {AppInfo.License}\n"
+                + $"由 {AppInfo.BuiltWith}（{AppInfo.BuiltWithModel}）写成\n"
+                + AppInfo.Repository
+                + "\n\n（双击这里也有条鱼）");
+
+            TitleBarStack.DoubleTapped += (_, _) =>
+            {
+                if (ContentFrame.Content is SettingsPage page)
+                {
+                    page.ShowEasterEggPublic();
+                    return;
+                }
+
+                NavigateTo("settings");
+                _ = DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                    () => (ContentFrame.Content as SettingsPage)?.ShowEasterEggPublic());
+            };
+        }
+        catch (Exception ex)
+        {
+            App.CrashLog("MainWindow: 标题栏彩蛋挂不上", ex);
+        }
     }
 
     /// <summary>第一次打开才弹引导；环境变量 QBANK_FORCE_ONBOARDING=1 可以强制弹（截图核验用）。</summary>

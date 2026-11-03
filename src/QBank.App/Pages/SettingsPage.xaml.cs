@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using QBank.App.Controls;
 using QBank.App.Services;
@@ -52,6 +53,8 @@ public sealed partial class SettingsPage : Page
             ShowGroup(_pendingGroup);
             _pendingGroup = null;
         }
+
+        MaybeAutoShowEasterEgg();
     }
 
     private string? _pendingGroup;
@@ -148,8 +151,7 @@ public sealed partial class SettingsPage : Page
     /// 方便截图核验（自动化截图没法可靠地模拟滚轮）。
     /// </summary>
     private void ApplyDebugScroll()
-    {
-        var target = Environment.GetEnvironmentVariable("QBANK_SCROLL_TO");
+    {        var target = Environment.GetEnvironmentVariable("QBANK_SCROLL_TO");
         if (string.IsNullOrWhiteSpace(target)) return;
 
         _ = DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
@@ -212,6 +214,11 @@ public sealed partial class SettingsPage : Page
                     ShowGroup("sources");
                     OcsListCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
                     break;
+                case "about":
+                case "author":
+                    ShowGroup("data");
+                    ScrollToAboutCard();
+                    break;
                 default:
                     if (double.TryParse(target, out var offset))
                     {
@@ -220,6 +227,22 @@ public sealed partial class SettingsPage : Page
                     break;
             }
         });
+    }
+
+    /// <summary>
+    /// 把「关于」卡片推到可视区。它在一长串卡片的最底部，StartBringIntoView 常常在布局还没量完时
+    /// 就算错了位置，所以滚到容器最底再重试一次。
+    /// </summary>
+    private void ScrollToAboutCard()
+    {
+        void Push()
+        {
+            ContentScroll.ChangeView(null, ContentScroll.ScrollableHeight, null, true);
+            AboutCard.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 1 });
+        }
+
+        Push();
+        _ = DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, Push);
     }
 
     private void BuildPresetMenu()
@@ -311,6 +334,7 @@ public sealed partial class SettingsPage : Page
             UpdateOcsBridgeStatus();
 
             DataDirText.Text = "数据目录：" + AppServices.Current.Config.DataDir;
+            UpdateAbout();
 
             // 网络出口
             var net = cfg.Network ??= new NetworkConfig();
@@ -1952,5 +1976,156 @@ public sealed partial class SettingsPage : Page
         };
         if (wide) dialog.MaxWidth = 780;
         await dialog.ShowAsync();
+    }
+
+    // ============ 关于 / 彩蛋 ============
+
+    private int _aboutVersionClicks;
+    private DateTime _aboutLastClick = DateTime.MinValue;
+
+    private void UpdateAbout()
+    {
+        AboutVersionText.Text = AppInfo.VersionLine;
+        AboutEditionText.Text = "这个安装包是「" + AppInfo.Edition + "」。"
+            + (AppInfo.HasBundledEngine
+                ? " 离线识图开箱即用，不用另装 Umi-OCR。"
+                : " 想开箱即用离线识图，请下「完整版」；也可以把识别引擎换成「视觉大模型」，一个字节都不用下载。");
+        AboutAuthorText.Text = $"{AppInfo.Developer} <{AppInfo.DeveloperEmail}>";
+        AboutRepoLink.Content = AppInfo.Repository;
+        AboutLicenseText.Text = AppInfo.License + " —— 随便用、随便改、随便分发，出事不赖作者";
+        AboutToolsText.Text = $"{AppInfo.BuiltWith} · {AppInfo.BuiltWithModel}，"
+            + $"从 {AppInfo.StartedAt} 开始一版一版磨出来的";
+    }
+
+    private void OnOpenRepository(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo { FileName = AppInfo.Repository, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            HeaderHint.Text = "打不开浏览器：" + ex.Message;
+        }
+    }
+
+    private async void OnCopyVersionInfo(object sender, RoutedEventArgs e)
+    {
+        var text = string.Join(Environment.NewLine,
+            AppInfo.VersionLine,
+            "版本：" + AppInfo.Edition,
+            "开发者：" + AppInfo.Developer,
+            "仓库：" + AppInfo.Repository,
+            "许可证：" + AppInfo.License,
+            "创作工具：" + AppInfo.BuiltWith + " · " + AppInfo.BuiltWithModel,
+            "系统：" + Environment.OSVersion.VersionString,
+            "运行时：.NET " + Environment.Version);
+
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(text);
+            Clipboard.SetContent(package);
+            HeaderHint.Text = "版本信息已复制到剪贴板（贴到 issue 里正好）。";
+        }
+        catch (Exception ex)
+        {
+            await ShowDialogAsync("复制失败", ex.Message);
+        }
+    }
+
+    /// <summary>连点版本号 5 下（每次间隔不超过 2 秒）就把彩蛋翻出来。</summary>
+    private async void OnAboutVersionTapped(object sender, TappedRoutedEventArgs e)
+    {
+        var now = DateTime.UtcNow;
+        if ((now - _aboutLastClick).TotalSeconds > 2) _aboutVersionClicks = 0;
+        _aboutLastClick = now;
+        _aboutVersionClicks++;
+
+        if (_aboutVersionClicks < 5) return;
+
+        _aboutVersionClicks = 0;
+        await ShowEasterEggAsync();
+    }
+
+    private async void OnShowEasterEgg(object sender, RoutedEventArgs e) => await ShowEasterEggAsync();
+
+    /// <summary>给主窗口（标题栏双击）用的公开入口。</summary>
+    public void ShowEasterEggPublic() => _ = ShowEasterEggAsync();
+
+    /// <summary>调试用：QBANK_EASTEREGG=1 时设置页加载完自动把彩蛋翻出来（截图核验用）。</summary>
+    private void MaybeAutoShowEasterEgg()
+    {
+        var flag = Environment.GetEnvironmentVariable("QBANK_EASTEREGG");
+        if (string.IsNullOrWhiteSpace(flag) || flag == "0") return;
+
+        _ = DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            async () =>
+            {
+                await Task.Delay(600);
+                await ShowEasterEggAsync();
+            });
+    }
+
+    private async Task ShowEasterEggAsync()
+    {
+        // 不直接查 Application.Current.Resources[ThemeResource 名] —— 那些键在 ThemeDictionaries 里，
+        // 顶层字典查不到会抛 KeyNotFoundException。用 Opacity 做层次就够了。
+        var fish = new TextBlock
+        {
+            Text = AppInfo.EasterEggFish,
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 13,
+            IsTextSelectionEnabled = true,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+
+        var quip = new TextBlock
+        {
+            Text = AppInfo.RandomEasterEggLine(),
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.75,
+        };
+
+        var footer = new TextBlock
+        {
+            Text = $"{AppInfo.VersionLine} · {AppInfo.Edition}\n"
+                 + $"作者 {AppInfo.Developer} · {AppInfo.License}\n"
+                 + $"由 {AppInfo.BuiltWith} 驱动（{AppInfo.BuiltWithModel}）写成\n"
+                 + AppInfo.Repository,
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 12,
+            Opacity = 0.6,
+            IsTextSelectionEnabled = true,
+            Margin = new Thickness(0, 6, 0, 0),
+        };
+
+        var body = new StackPanel { Spacing = 12 };
+        body.Children.Add(fish);
+        body.Children.Add(new TextBlock
+        {
+            Text = "这条鱼是题库工坊的吉祥物，也是写它的那个 AI 的化身。",
+            TextWrapping = TextWrapping.Wrap,
+        });
+        body.Children.Add(quip);
+        body.Children.Add(footer);
+
+        while (true)
+        {
+            var dialog = new ContentDialog
+            {
+                Title = "🐟 是谁写的这个",
+                Content = new ScrollViewer { Content = body, MaxHeight = 460 },
+                CloseButtonText = "知道了",
+                PrimaryButtonText = "再来一句",
+                XamlRoot = XamlRoot,
+                MaxWidth = 620,
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary) break;
+
+            quip.Text = AppInfo.RandomEasterEggLine();
+        }
     }
 }

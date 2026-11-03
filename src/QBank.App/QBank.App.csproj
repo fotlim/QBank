@@ -20,13 +20,15 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
     <!-- 版本号统一在这里改，界面标题和安装包都读它 -->
-    <Version>1.0.9</Version>
-    <AssemblyVersion>1.0.9.0</AssemblyVersion>
-    <FileVersion>1.0.9.0</FileVersion>
+    <Version>1.1.0</Version>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
     <Product>题库工坊 QBank</Product>
     <AssemblyTitle>题库工坊 QBank</AssemblyTitle>
-    <Company>Escape-Lin</Company>
-    <Copyright>Copyright (c) 2026 Escape-Lin</Copyright>
+    <Company>fotlim</Company>
+    <Copyright>Copyright (c) 2026 fotlim</Copyright>
+    <Authors>fotlim</Authors>
+    <RepositoryUrl>https://github.com/fotlim/QBank</RepositoryUrl>
   </PropertyGroup>
 
   <ItemGroup>

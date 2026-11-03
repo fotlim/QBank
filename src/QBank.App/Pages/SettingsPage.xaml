@@ -577,6 +577,55 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- 关于（连点版本号 5 次有条鱼会冒出来） -->
+                    <Border x:Name="AboutCard" Style="{StaticResource CardBorder}">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="关于" Style="{StaticResource SectionTitle}" Margin="0" />
+
+                            <StackPanel Spacing="6">
+                                <TextBlock x:Name="AboutVersionText" FontSize="16" FontWeight="SemiBold"
+                                           Tapped="OnAboutVersionTapped" IsTextSelectionEnabled="False" />
+                                <TextBlock x:Name="AboutEditionText" Style="{StaticResource Subtle}" TextWrapping="Wrap" />
+                            </StackPanel>
+
+                            <Grid ColumnSpacing="14" RowSpacing="6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="开发者" Style="{StaticResource FieldLabel}" Margin="0" />
+                                <TextBlock x:Name="AboutAuthorText" Grid.Row="0" Grid.Column="1" Style="{StaticResource Subtle}"
+                                           IsTextSelectionEnabled="True" />
+
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="项目仓库" Style="{StaticResource FieldLabel}" Margin="0" />
+                                <HyperlinkButton x:Name="AboutRepoLink" Grid.Row="1" Grid.Column="1" Padding="0"
+                                                 Click="OnOpenRepository" FontSize="12" />
+
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="许可证" Style="{StaticResource FieldLabel}" Margin="0" />
+                                <TextBlock x:Name="AboutLicenseText" Grid.Row="2" Grid.Column="1" Style="{StaticResource Subtle}" />
+
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="创作工具" Style="{StaticResource FieldLabel}" Margin="0" />
+                                <TextBlock x:Name="AboutToolsText" Grid.Row="3" Grid.Column="1" Style="{StaticResource Subtle}"
+                                           TextWrapping="Wrap" />
+                            </Grid>
+
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="复制版本信息" Click="OnCopyVersionInfo" />
+                                <Button Content="看看是谁写的这个" Click="OnShowEasterEgg" />
+                            </StackPanel>
+
+                            <TextBlock Style="{StaticResource Subtle}" TextWrapping="Wrap"
+                                       Text="（对着上面那行版本号连点 5 下，也有惊喜。）" />
+                        </StackPanel>
+                    </Border>
+
                 </StackPanel>
 
 </StackPanel>
