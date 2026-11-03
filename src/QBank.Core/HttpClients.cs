@@ -9,8 +9,19 @@ public static class HttpClients
 {
     private static HttpClient? _shared;
     private static HttpClient? _scrape;
+    private static HttpClient? _direct;
     private static NetworkConfig? _network;
     private static string? _autoFallbackNote;
+
+    /// <summary>
+    /// 已经确认过「系统代理坏了」——这时无论配置怎么写都走直连。
+    /// 为什么需要它：代理软件是**后来才退出的**时候，共享客户端里那个还活着的代理对象会一直
+    /// 用下去（连接被拒），光靠启动时那一次探测救不回来。
+    /// </summary>
+    private static bool _forceDirect;
+
+    /// <summary>是否已经因为「代理不可用」自动改走直连。</summary>
+    public static bool ForceDirectActive => _forceDirect;
 
     /// <summary>
     /// 当前网络出口设置。由 App 启动时从配置里灌进来；
@@ -22,12 +33,87 @@ public static class HttpClients
         set
         {
             _network = value;
+            // 用户重新保存了网络设置 —— 把「上次判定代理坏了」这条记忆清掉，
+            // 让他们换个代理或重新开代理软件以后能立刻生效。
+            _forceDirect = false;
             Reset();
         }
     }
 
     /// <summary>「跟随系统代理」时自动改走直连的原因（没发生回落就是 null）。</summary>
     public static string? AutoFallbackNote => _autoFallbackNote;
+
+    /// <summary>
+    /// 系统代理是不是指向了一个没人监听的本机端口。
+    /// 与<c>TryDescribeSystemProxy</c>的区别：这里是**并集**判断 ——
+    /// .NET 缓存的系统代理和注册表两条路都看，任一命中就算死。
+    /// </summary>
+    public static bool SystemProxyLooksDead(out string description)
+    {
+        description = string.Empty;
+
+        if (TryDescribeSystemProxy(out var desc, out var dead))
+        {
+            description = desc;
+            if (dead) return true;
+        }
+
+        // 注册表单独再问一遍：HttpClient.DefaultProxy 在「代理刚被关掉」之后
+        // 可能已经解析成本机直连（HttpNoProxy），这时只有注册表记得那个死端口。
+        try
+        {
+            if (TryReadRegistryProxy(out var regUri))
+            {
+                if (description.Length == 0) description = regUri;
+                var uri = new Uri(regUri);
+                if (IsDeadLocalProxy(uri.Host, uri.Port)) return true;
+            }
+        }
+        catch
+        {
+            // 读不到就当作判不出来
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// 这条错误像不像「请求走了系统代理，而那个代理没在跑」。
+    /// 只看「本机端口 + 积极拒绝」两头都命中的情况，避免误伤真的连不上外网。
+    /// </summary>
+    public static bool LooksLikeBrokenProxy(string? error)
+    {
+        var msg = error ?? string.Empty;
+        if (msg.Length == 0) return false;
+
+        var refused =
+            msg.Contains("积极拒绝", StringComparison.Ordinal) ||
+            msg.Contains("actively refused", StringComparison.OrdinalIgnoreCase);
+        var localPort =
+            msg.Contains("127.0.0.1:", StringComparison.Ordinal) ||
+            msg.Contains("localhost:", StringComparison.OrdinalIgnoreCase) ||
+            msg.Contains("[::1]:", StringComparison.Ordinal);
+
+        return refused && localPort;
+    }
+
+    /// <summary>
+    /// 认定系统代理坏了：往后一律走直连，并让下次取 Shared 时重建客户端。
+    /// <para>
+    /// 调用顺序有讲究：<c>Reset()</c> 会清空 <c>_autoFallbackNote</c>，
+    /// 所以那句写给用户看的话必须在 <c>Reset()</c> <b>之后</b> 赋值。
+    /// </para>
+    /// </summary>
+    public static void MarkProxyBroken(string? reason = null)
+    {
+        if (_forceDirect) return;
+
+        _forceDirect = true;
+        Reset();
+        _autoFallbackNote = string.IsNullOrWhiteSpace(reason)
+            ? "检测到系统代理没在运行，已自动改走直连。"
+            : "检测到系统代理没在运行（" + reason!.Trim() + "），已自动改走直连。";
+    }
 
     /// <summary>默认客户端（按当前的代理设置构建，设置变了会自动重建）。</summary>
     public static HttpClient Shared => _shared ??= Create();
@@ -39,16 +125,25 @@ public static class HttpClients
     /// </summary>
     public static HttpClient ForWebScraping => _scrape ??= Create(Network, false, null, preferHttp11: true);
 
+    /// <summary>
+    /// 强制直连的客户端。代理被判定坏掉以后，重试就用它 —— 不经过任何代理。
+    /// </summary>
+    public static HttpClient DirectClient
+        => _direct ??= Create(new NetworkConfig { ProxyMode = NetworkConfig.ModeDirect }, false, null);
+
     /// <summary>配置变了以后调用，下次取 Shared 会重新构建。</summary>
     public static void Reset()
     {
         var old = _shared;
         var oldScrape = _scrape;
+        var oldDirect = _direct;
         _shared = null;
         _scrape = null;
+        _direct = null;
         _autoFallbackNote = null;
         try { old?.Dispose(); } catch { /* 忽略 */ }
         try { oldScrape?.Dispose(); } catch { /* 忽略 */ }
+        try { oldDirect?.Dispose(); } catch { /* 忽略 */ }
     }
 
     public static HttpClient Create(bool allowInsecureCertificate = false, TimeSpan? poolLifetime = null)
@@ -95,12 +190,12 @@ public static class HttpClients
         // 「由于目标计算机积极拒绝，无法连接」。
         if (network is not null)
         {
-            var proxy = network.BuildProxy();
+            var proxy = _forceDirect ? null : network.BuildProxy();
             if (proxy is not null && network.FallbackToDirectOnProxyFailure)
             {
                 // 「跟随系统代理」时先确认那个代理真的活着；死了就直接走直连，
                 // 别让一条过期注册表把整个软件废掉。
-                if (TryDescribeSystemProxy(out var proxyDesc, out var dead) && dead)
+                if (SystemProxyLooksDead(out var proxyDesc))
                 {
                     _autoFallbackNote = "系统代理 " + proxyDesc + " 没有响应，已自动改走直连。";
                     proxy = null;

@@ -326,6 +326,7 @@ public sealed class AiAnswerService
         {
             outcome.Ok = false;
             outcome.Error = result.Error ?? "模型调用失败";
+            if (!string.IsNullOrWhiteSpace(result.Note)) outcome.Notices.Add(result.Note!);
             return outcome;
         }
 
@@ -340,6 +341,7 @@ public sealed class AiAnswerService
 
         var noteParts = new List<string>();
         if (!string.IsNullOrWhiteSpace(parsed.Explain)) noteParts.Add(parsed.Explain!.Trim());
+        if (!string.IsNullOrWhiteSpace(result.Note)) noteParts.Add(result.Note!.Trim());
         noteParts.Add($"模型 {result.Model ?? provider.Model}");
         if (result.CompletionTokens > 0) noteParts.Add($"{result.CompletionTokens} tokens");
         if (parsed.Fallback) noteParts.Add("未按 JSON 格式输出，已兜底解析");

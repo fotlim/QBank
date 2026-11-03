@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -48,6 +48,9 @@ public sealed class AiChatResult
     public int PromptTokens { get; set; }
     public int CompletionTokens { get; set; }
     public string? Raw { get; set; }
+
+    /// <summary>这次调用里发生的小插曲（例如「系统代理没在跑，已自动改走直连」）。</summary>
+    public string? Note { get; set; }
 }
 
 /// <summary>
@@ -136,9 +139,6 @@ public sealed class AiChatClient
         bool jsonMode,
         CancellationToken ct)
     {
-        var result = new AiChatResult { Model = provider.Model };
-        var sw = Stopwatch.StartNew();
-
         var body = new JsonObject
         {
             ["model"] = provider.Model,
@@ -152,6 +152,41 @@ public sealed class AiChatClient
 
         MergeExtraParams(body, provider.ExtraParamsJson);
 
+        var result = await ExchangeAsync(_http, provider, endpoint, body, ct).ConfigureAwait(false);
+
+        // 系统代理指向一个已经退出的本地端口时，第一条请求必然「积极拒绝」。
+        // 这种情况不该让用户自己去翻设置：记住代理坏了，然后立刻用直连重试一次。
+        if (!result.Ok && HttpClients.LooksLikeBrokenProxy(result.Error))
+        {
+            var proxyError = result.Error;
+            HttpClients.MarkProxyBroken(proxyError);
+
+            var retry = await ExchangeAsync(HttpClients.DirectClient, provider, endpoint, body, ct)
+                .ConfigureAwait(false);
+            if (retry.Ok)
+            {
+                retry.Note = "系统代理没在跑，这次已自动改走直连。";
+                return retry;
+            }
+
+            retry.Error = retry.Error ?? proxyError;
+            return retry;
+        }
+
+        return result;
+    }
+
+    /// <summary>真正发一次请求。把「走哪个 HttpClient」参数化，好让上面用直连重试。</summary>
+    private static async Task<AiChatResult> ExchangeAsync(
+        HttpClient http,
+        AiProviderConfig provider,
+        string endpoint,
+        JsonObject body,
+        CancellationToken ct)
+    {
+        var result = new AiChatResult { Model = provider.Model };
+        var sw = Stopwatch.StartNew();
+
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(provider.TimeoutSeconds, 5, 600)));
 
@@ -164,7 +199,7 @@ public sealed class AiChatClient
 
         try
         {
-            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseContentRead, timeoutCts.Token)
+            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseContentRead, timeoutCts.Token)
                 .ConfigureAwait(false);
             var raw = await response.Content.ReadAsStringAsync(timeoutCts.Token).ConfigureAwait(false);
             result.HttpStatus = (int)response.StatusCode;

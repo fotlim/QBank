@@ -1028,6 +1028,8 @@ public sealed partial class SettingsPage : Page
 
             var note = QBank.Core.HttpClients.AutoFallbackNote;
             if (!string.IsNullOrEmpty(note)) lines.Add("· " + note);
+            if (QBank.Core.HttpClients.ForceDirectActive)
+                lines.Add("· 已经确认过系统代理不可用，本程序现在一律直连（重新保存网络设置即可恢复跟随系统代理）。");
 
             if (mode == "auto")
             {
@@ -1035,7 +1037,7 @@ public sealed partial class SettingsPage : Page
                 if (string.IsNullOrEmpty(desc))
                     lines.Add("· 系统没有设置代理。");
                 else if (dead)
-                    lines.Add($"· 检测到系统代理 {desc}，但这个端口没人监听 —— 保存后本程序会自动绕过它。");
+                    lines.Add($"· 检测到系统代理 {desc}，但这个端口没人监听 —— 点上面的「改用直连并保存」最省事。");
                 else
                     lines.Add($"· 系统代理 {desc} 可访问。");
             }
@@ -1053,6 +1055,32 @@ public sealed partial class SettingsPage : Page
         => QBank.Core.HttpClients.DescribeSystemProxyState(out description, out var dead) && dead;
 
     private void OnRefreshNetwork(object sender, RoutedEventArgs e) => UpdateNetworkStatus();
+
+    /// <summary>
+    /// 一键改走直连：把代理模式写成 direct、保存、立刻重建客户端。
+    /// 代理软件关掉以后系统里残留死代理是最常见的「全都不通」原因，这个按钮就是给它的。
+    /// </summary>
+    private async void OnUseDirectNow(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            SelectProxyMode(NetworkConfig.ModeDirect);
+            ApplyNetworkToConfig();
+
+            AppServices.Current.SaveConfig();   // SaveConfig 里会调 ApplyNetworkConfig → 重建客户端
+            UpdateProxyModeUi();
+            UpdateNetworkStatus();
+
+            await ShowDialogAsync("已改走直连",
+                "网络出口已设为「直连（忽略系统代理）」并保存。\n\n" +
+                "AI 模型、自定义接口、在线题库、模型列表现在都直接连外网，不再经过那个没人监听的本地端口。\n" +
+                "如果以后又把代理软件开起来了，回到这里改回「跟随系统代理」保存就行。");
+        }
+        catch (Exception ex)
+        {
+            await ShowDialogAsync("没能保存", ex.Message);
+        }
+    }
 
     private async void OnTestNetwork(object sender, RoutedEventArgs e)
     {

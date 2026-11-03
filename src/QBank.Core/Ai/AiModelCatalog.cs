@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text.Json;
 using QBank.Core.Models;
 
@@ -61,6 +61,9 @@ public sealed class AiModelListResult
     public long ElapsedMs { get; set; }
     public string? Raw { get; set; }
     public bool OllamaNative { get; set; }
+
+    /// <summary>这次拉取里发生的小插曲（例如「系统代理没在跑，已自动改走直连」）。</summary>
+    public string? Note { get; set; }
 }
 
 /// <summary>
@@ -143,6 +146,29 @@ public sealed class AiModelCatalog
         bool nativeOllama,
         CancellationToken ct)
     {
+        var result = await FetchWithAsync(_http, provider, endpoint, nativeOllama, ct).ConfigureAwait(false);
+
+        // 和聊天请求一样：系统代理指向一个已经退出的本地端口时，第一条必然「积极拒绝」。
+        // 记住这条并立刻用直连再试一次，别让用户自己去翻设置。
+        if (!result.Ok && HttpClients.LooksLikeBrokenProxy(result.Error))
+        {
+            HttpClients.MarkProxyBroken(result.Error);
+            var retry = await FetchWithAsync(HttpClients.DirectClient, provider, endpoint, nativeOllama, ct)
+                .ConfigureAwait(false);
+            if (retry.Ok) retry.Note = "系统代理没在跑，这次已自动改走直连。";
+            return retry;
+        }
+
+        return result;
+    }
+
+    private static async Task<AiModelListResult> FetchWithAsync(
+        HttpClient http,
+        AiProviderConfig provider,
+        string endpoint,
+        bool nativeOllama,
+        CancellationToken ct)
+    {
         var result = new AiModelListResult { Endpoint = endpoint, OllamaNative = nativeOllama };
         if (string.IsNullOrWhiteSpace(endpoint))
         {
@@ -160,7 +186,7 @@ public sealed class AiModelCatalog
             if (!string.IsNullOrWhiteSpace(provider.ApiKey) && !nativeOllama)
                 request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + provider.ApiKey.Trim());
 
-            using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseContentRead, timeoutCts.Token)
+            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseContentRead, timeoutCts.Token)
                 .ConfigureAwait(false);
             var raw = await response.Content.ReadAsStringAsync(timeoutCts.Token).ConfigureAwait(false);
             result.ElapsedMs = sw.ElapsedMilliseconds;
@@ -348,7 +374,8 @@ public sealed class AiModelCatalog
     {
         if (result.Ok)
             return $"已获取 {result.Models.Count} 个模型 · {result.ElapsedMs}ms" +
-                   (result.OllamaNative ? " · Ollama 原生接口" : string.Empty);
+                   (result.OllamaNative ? " · Ollama 原生接口" : string.Empty) +
+                   (string.IsNullOrWhiteSpace(result.Note) ? string.Empty : " · " + result.Note);
         return "获取失败：" + result.Error;
     }
 

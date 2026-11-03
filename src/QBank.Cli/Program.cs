@@ -65,6 +65,7 @@ internal static class Program
             await RunAsync("AI 答题", () => TestAiAnswerAsync(workDir));
             await RunAsync("AI 模型列表", () => TestModelCatalogAsync(workDir));
             await RunAsync("网络出口（死代理绕行）", TestNetworkConfigAsync);
+            await RunAsync("AI 死代理自动直连", TestProxyRetryAsync);
             await RunAsync("设置备份与恢复", () => TestSettingsBackupAsync(workDir));
             await RunAsync("本地题库增删查", () => TestLocalBankAsync(workDir));
             await RunAsync("题库标签与分页", () => TestBankTaggingAsync(workDir));
@@ -528,6 +529,63 @@ internal static class Program
         var explained = HttpClients.ExplainNetworkError(
             new HttpRequestException("由于目标计算机积极拒绝，无法连接。 (127.0.0.1:12000)"));
         Check(explained.Contains("网络出口"), "死代理的错误提示应指引到「网络出口」设置，实际：" + explained);
+    }
+
+    /// <summary>
+    /// 回归用例：代理软件关掉以后，共享客户端里那个已经死掉的代理会让每条请求
+    /// 都报「由于目标计算机积极拒绝」。正确行为是自动改走直连并重试成功，
+    /// 而不是把用户丢在「去设置里改代理」那一步。
+    /// </summary>
+    private static async Task TestProxyRetryAsync()
+    {
+        using var mock = new MockServer();
+        mock.Map("/v1/chat/completions", (query, body) => (200, "application/json",
+            "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"北京\"}}]," +
+            "\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":3}}"));
+
+        // 借一个刚关掉的本地端口当「死代理」
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var deadPort = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+
+        var provider = new AiProviderConfig
+        {
+            ProviderKind = "custom",
+            BaseUrl = mock.BaseUrl + "/v1",
+            Model = "m1",
+            TimeoutSeconds = 20,
+            MaxTokens = 64,
+        };
+
+        // 这条 HttpClient 就是「请求必经那个死代理」的样子
+        using var brokenHttp = new HttpClient(new HttpClientHandler
+        {
+            Proxy = new System.Net.WebProxy("http://127.0.0.1:" + deadPort),
+            UseProxy = true,
+        });
+
+        var result = await new AiChatClient(brokenHttp)
+            .CompleteAsync(provider, new[] { AiChatMessage.User("中国的首都是哪座城市？") }, jsonMode: false);
+
+        Check(result.Ok, "死代理下应自动改走直连并成功，实际：" + (result.Error ?? "（没有错误）"));
+        Check(result.Note is not null && result.Note.Contains("直连"),
+            "应记录「已自动改走直连」，实际：" + (result.Note ?? "（空）"));
+        Check(HttpClients.ForceDirectActive, "应记住代理已坏，之后一律直连");
+        Check(mock.Requests.Count >= 1, "mock 服务应至少收到一次请求");
+        Check(HttpClients.AutoFallbackNote is not null, "应留下给用户看的回落说明");
+
+        // 错误文案本身也要像「死代理」（这条是上面自动重试的判据）
+        Check(HttpClients.LooksLikeBrokenProxy(
+                "网络请求失败：由于目标计算机积极拒绝，无法连接。 (127.0.0.1:12000)"),
+            "死代理的报错应被识别出来");
+        Check(!HttpClients.LooksLikeBrokenProxy(
+                "网络请求失败：由于目标计算机积极拒绝，无法连接。 (93.184.216.34:443)"),
+            "非本机端口的拒绝不该误判成代理问题");
+
+        // 收尾：模拟「用户重新保存了网络设置」，记忆要清掉，别影响后面的用例
+        HttpClients.Network = null;
+        Check(!HttpClients.ForceDirectActive, "重新保存网络设置后应恢复跟随系统代理");
     }
 
     private static async Task<bool> ProbeAsync(HttpClient client, string url)

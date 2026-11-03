@@ -126,6 +126,8 @@
                                       Content="跟随系统代理时，如果代理指向的本机端口没在监听，自动改走直连" />
 
                             <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button x:Name="NetworkDirectButton" Content="改用直连并保存"
+                                        Style="{StaticResource AccentButtonStyle}" Click="OnUseDirectNow" />
                                 <Button Content="刷新当前出口" Click="OnRefreshNetwork" />
                                 <Button Content="用第一个可用模型试一下" Click="OnTestNetwork" />
                             </StackPanel>

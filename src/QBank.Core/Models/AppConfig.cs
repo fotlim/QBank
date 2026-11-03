@@ -437,13 +437,18 @@ public sealed class CustomOcrConfig
 /// <summary>网络出口设置：解决系统代理把请求送去没在跑的本地端口。</summary>
 public sealed class NetworkConfig
 {
+    /// <summary>代理模式取值（避免各处手写字符串写错）。</summary>
+    public const string ModeAuto = "auto";
+    public const string ModeDirect = "direct";
+    public const string ModeCustom = "custom";
+
     /// <summary>
     /// 代理模式：
     ///   auto   = 跟随系统代理（默认；Fiddler/Clash 开着就自动走）
     ///   direct = 直连，忽略系统代理（最常见的问题就是系统代理指向了没开的本地端口）
     ///   custom = 用下面填的代理地址
     /// </summary>
-    public string ProxyMode { get; set; } = "auto";
+    public string ProxyMode { get; set; } = ModeAuto;
 
     /// <summary>custom 模式下的代理地址，例如 http://127.0.0.1:7890。</summary>
     public string ProxyUrl { get; set; } = string.Empty;
