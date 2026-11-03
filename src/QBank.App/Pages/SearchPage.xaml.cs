@@ -56,17 +56,29 @@ public sealed partial class SearchPage : Page
     private void BuildSourceToggles()
     {
         SourcePanel.Children.Clear();
+        SourcePanel.RowDefinitions.Clear();
         var cfg = AppServices.Current.Config.Config;
 
-        AddToggle("本地题库 + 缓存", cfg.Search.UseLocalBank, v => cfg.Search.UseLocalBank = v);
-        AddToggle("局域网共享", cfg.Search.UseLanShare, v => cfg.Search.UseLanShare = v);
-        AddToggle("在线题库（OCS）", cfg.Search.UseOcs, v => cfg.Search.UseOcs = v);
-        AddToggle("AI 模型", cfg.Search.UseAi, v => cfg.Search.UseAi = v);
-        AddToggle("网页搜索（省 token）", cfg.Search.UseWeb, v => cfg.Search.UseWeb = v);
-
-        void AddToggle(string text, bool value, Action<bool> apply)
+        var toggles = new (string Text, bool Value, Action<bool> Apply)[]
         {
-            var index = SourcePanel.Children.Count;
+            ("本地题库 + 缓存", cfg.Search.UseLocalBank, v => cfg.Search.UseLocalBank = v),
+            ("局域网共享", cfg.Search.UseLanShare, v => cfg.Search.UseLanShare = v),
+            ("在线题库（OCS）", cfg.Search.UseOcs, v => cfg.Search.UseOcs = v),
+            ("AI 模型", cfg.Search.UseAi, v => cfg.Search.UseAi = v),
+            ("网页搜索（省 token）", cfg.Search.UseWeb, v => cfg.Search.UseWeb = v),
+        };
+
+        // 行数按来源个数算，不靠 XAML 里写死 —— 写死两行时第 5 项会被夹到最后一行，和上一项重叠。
+        const int columns = 2;
+        var rows = (toggles.Length + columns - 1) / columns;
+        for (var i = 0; i < rows; i++)
+        {
+            SourcePanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        }
+
+        for (var index = 0; index < toggles.Length; index++)
+        {
+            var (text, value, apply) = toggles[index];
             var box = new CheckBox
             {
                 Content = text,
@@ -74,8 +86,8 @@ public sealed partial class SearchPage : Page
                 MinWidth = 0,
                 Margin = new Thickness(0, 0, 0, 2)
             };
-            Grid.SetRow(box, index / 2);
-            Grid.SetColumn(box, index % 2);
+            Grid.SetRow(box, index / columns);
+            Grid.SetColumn(box, index % columns);
             box.Checked += (_, _) => { apply(true); AppServices.Current.SaveConfig(); };
             box.Unchecked += (_, _) => { apply(false); AppServices.Current.SaveConfig(); };
             SourcePanel.Children.Add(box);

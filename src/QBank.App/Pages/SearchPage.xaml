@@ -72,12 +72,13 @@
                                      Height="96" />
 
                             <TextBlock Text="题目来源" Style="{StaticResource SectionTitle}" Margin="0,4,0,0" />
-                            <Grid x:Name="SourcePanel" ColumnSpacing="10" RowSpacing="2">
+                            <Grid x:Name="SourcePanel" ColumnSpacing="10" RowSpacing="6">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>

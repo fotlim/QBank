@@ -35,7 +35,7 @@ QBank 把这些合成一个窗口：**输入题干（或者直接截图）→ �
 
 到 [Releases](https://github.com/fotlim/QBank/releases) 下载，两种形式任选：
 
-### 安装版 `QBank-Setup-1.0.7.exe`
+### 安装版 `QBank-Setup-1.0.8.exe`
 
 双击安装，**安装路径可以随便改**（默认 `%LOCALAPPDATA%\Programs\QBank`，装到 `D:\Tools\QBank` 也行，路径带空格或中文都没问题）。
 
@@ -44,7 +44,7 @@ QBank 把这些合成一个窗口：**输入题干（或者直接截图）→ �
 - 可选任务：「开机自动启动」「数据跟程序放一起（便携模式）」
 - 卸载时会问要不要连题库数据一起删，默认保留
 
-### 绿色版 `QBank-1.0.7-portable.zip`
+### 绿色版 `QBank-1.0.8-portable.zip`
 
 解压到任意目录，双击 `QBank.exe` 就能跑，不写注册表、不留痕迹。
 想让数据跟着程序走（比如放 U 盘里），在 exe 旁边新建一个空文件 `portable.txt`。
@@ -54,7 +54,7 @@ QBank 把这些合成一个窗口：**输入题干（或者直接截图）→ �
 > 这是 `%TEMP%` 被安全软件、组策略或系统加固工具限制导致的，不是安装包的问题——Inno Setup 启动时必须先在临时目录里解出真实安装程序。
 > 两个办法任选：
 > 1. **直接用绿色版 zip**（推荐，它不依赖临时目录）；
-> 2. 或者把安装包移到别的目录再跑，或手动指定临时目录：`QBank-Setup-1.0.7.exe /TEMP=D:\temp`。
+> 2. 或者把安装包移到别的目录再跑，或手动指定临时目录：`QBank-Setup-1.0.8.exe /TEMP=D:\temp`。
 
 
 ## 界面
@@ -136,7 +136,7 @@ dotnet publish src\QBank.App\QBank.App.csproj -c Release -r win-x64 --self-conta
 & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" install\qbank.iss
 ```
 
-产物在 `install\Output\QBank-Setup-1.0.7.exe`，232 MB 的内容压到约 63 MB。
+产物在 `install\Output\QBank-Setup-1.0.8.exe`，232 MB 的内容压到约 63 MB。
 
 **便携模式**：在 exe 同目录放一个 `portable.txt`（或 `portable` 文件夹），数据就存到 `exe\data`，不碰 `%LOCALAPPDATA%`。
 
@@ -649,7 +649,7 @@ QBank/
 两边必须一致。本程序改完口令要「保存设置」才会重建服务，OCS 那边也要重新导入配置。
 
 **报「由于目标计算机积极拒绝，无法连接 (127.0.0.1:xxxxx)」**
-系统代理残留。关掉代理软件后 Windows 不会清掉 `ProxyServer` 注册表值，请求全被送去一个死端口。（1.0.7 起程序会**当场自动改走直连并重试**，答案里会注明「系统代理没在跑，这次已自动改走直连」；想彻底不再跟代理纠缠，就到设置 →「网络出口」点**「改用直连并保存」**，详见第 4 节。）
+系统代理残留。关掉代理软件后 Windows 不会清掉 `ProxyServer` 注册表值，请求全被送去一个死端口。（1.0.8 起程序会**当场自动改走直连并重试**，答案里会注明「系统代理没在跑，这次已自动改走直连」；想彻底不再跟代理纠缠，就到设置 →「网络出口」点**「改用直连并保存」**，详见第 4 节。）
 
 **自定义接口 / 自建网关也连不上**
 跟上面同一个原因 —— 网络出口是全局的，对自定义接口一样生效。改成直连就行。
